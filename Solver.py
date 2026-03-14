@@ -1,23 +1,25 @@
 def isValidSudoku(board) -> bool:
-        filledRows = [set() for _ in range(9)]
-        filledCols = [set() for _ in range(9)]
-        filledBoxes = [set() for _ in range(9)]
+    if (board == None or len(board) != 9 or len(board[0]) != 9):
+        return False
+    filledRows = [set() for _ in range(9)]
+    filledCols = [set() for _ in range(9)]
+    filledBoxes = [set() for _ in range(9)]
 
-        for i in range(9):
-            for j in range(9):
-                boxNum = (i // 3) * 3 + (j // 3)
+    for i in range(9):
+        for j in range(9):
+            boxNum = (i // 3) * 3 + (j // 3)
 
-                if board[i][j] != ".":
-                    digit = int(board[i][j])
-                    if ((digit not in filledRows[i]) and 
-                        (digit not in filledCols[j]) and 
-                        (digit not in filledBoxes[boxNum])):
-                        filledRows[i].add(digit)
-                        filledCols[j].add(digit)
-                        filledBoxes[boxNum].add(digit)
-                    else:
-                        return False
-        return True
+            if board[i][j] != ".":
+                digit = int(board[i][j])
+                if ((digit not in filledRows[i]) and 
+                    (digit not in filledCols[j]) and 
+                    (digit not in filledBoxes[boxNum])):
+                    filledRows[i].add(digit)
+                    filledCols[j].add(digit)
+                    filledBoxes[boxNum].add(digit)
+                else:
+                    return False
+    return True
 
 def solveSudoku(board) -> None:
     filledRows = [set() for _ in range(9)]
