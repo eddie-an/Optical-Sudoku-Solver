@@ -2,6 +2,13 @@
 Solves Sudoku puzzles using computer vision
 
 
+## Dataset
+[Sudoku Dataset](https://github.com/wichtounet/sudoku_dataset/blob/master/mixed/image98.dat)
+
+If we do the ML approach for digit recognition, this may be good to use:
+[MNIST handwritten digits](https://www.kaggle.com/datasets/hojjatk/mnist-dataset)
+
+
 ## Installing dependencies
 Create environment: `python -m venv venv`
 Activate it:
