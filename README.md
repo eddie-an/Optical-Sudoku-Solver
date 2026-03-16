@@ -3,7 +3,7 @@ Solves Sudoku puzzles using computer vision
 
 
 ## Dataset
-[Sudoku Dataset](https://github.com/wichtounet/sudoku_dataset/blob/master/mixed/image98.dat)
+[Sudoku Dataset](https://github.com/wichtounet/sudoku_dataset)
 
 If we do the ML approach for digit recognition, this may be good to use:
 [MNIST handwritten digits](https://www.kaggle.com/datasets/hojjatk/mnist-dataset)
