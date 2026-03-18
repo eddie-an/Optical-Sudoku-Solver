@@ -5,8 +5,10 @@ Solves Sudoku puzzles using computer vision
 ## Dataset
 [Sudoku Dataset](https://github.com/wichtounet/sudoku_dataset)
 
-If we do the ML approach for digit recognition, this may be good to use:
-[MNIST handwritten digits](https://www.kaggle.com/datasets/hojjatk/mnist-dataset)
+### Digit Recognition Dataset
+We use the [Chars74K EnglishFnt](http://www.ee.surrey.ac.uk/CVSSP/demos/chars74k/) subset — computer-rendered digits across 1,016 fonts, well-matched to printed Sudoku puzzles.
+
+**No manual download required.** Run `DigitRecognition.ipynb` and the first cell will automatically download and extract the dataset into `data/`.
 
 
 ## Installing dependencies
