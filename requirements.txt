@@ -5,3 +5,4 @@ matplotlib
 jupyter
 ipykernel
 scikit-image
+scikit-learn
