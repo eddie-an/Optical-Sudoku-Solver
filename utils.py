@@ -1,14 +1,21 @@
 import cv2
 import numpy as np
-from skimage.feature import hog
+from skimage.feature import hog, local_binary_pattern
 
 # HOG parameters — must stay consistent between training and inference
+# pixels_per_cell=(4,4) gives a 10x10 cell grid on a 40x40 image,
+# capturing finer local structure to distinguish similar digits (3/6/8/9)
 HOG_PARAMS = dict(
     orientations=9,
-    pixels_per_cell=(8, 8),
+    pixels_per_cell=(4, 4),
     cells_per_block=(2, 2),
     block_norm="L2-Hys",
 )
+
+# LBP parameters — captures loop/curve topology that HOG alone misses
+# uniform LBP with P=8, R=1 produces 59 unique pattern bins
+LBP_PARAMS = dict(P=8, R=1, method="uniform")
+LBP_GRID = 4  # divide image into LBP_GRID x LBP_GRID regions for spatial encoding
 
 
 def normalize_cell(img, canvas_size=40, padding=4):
@@ -42,16 +49,16 @@ def normalize_cell(img, canvas_size=40, padding=4):
     # Threshold to clean binary
     _, binary = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
-    # Morphological opening: erode then dilate to remove small isolated blobs
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
-    binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
+    # # Morphological opening: erode then dilate to remove small isolated blobs
+    # kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+    # binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
 
-    # Keep only the largest connected component (removes grid lines and fragments)
-    num_labels, labels_map, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
-    if num_labels > 1:
-        # stats[0] is the background — find the largest foreground component
-        largest = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
-        binary = np.where(labels_map == largest, 255, 0).astype(np.uint8)
+    # # Keep only the largest connected component (removes grid lines and fragments)
+    # num_labels, labels_map, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
+    # if num_labels > 1:
+    #     # stats[0] is the background — find the largest foreground component
+    #     largest = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
+    #     binary = np.where(labels_map == largest, 255, 0).astype(np.uint8)
 
     # Find bounding box of digit pixels
     coords = cv2.findNonZero(binary)
@@ -239,7 +246,7 @@ def extract_hog_features(imgs):
         imgs (np.ndarray): Array of grayscale images, shape (N, H, W).
 
     Returns:
-        np.ndarray: Feature matrix of shape (N, num_features).
+        np.ndarray: Feature matrix of shape (N, num_hog_features).
     """
     features = []
     for img in imgs:
@@ -247,3 +254,62 @@ def extract_hog_features(imgs):
         feat = hog(img_norm, **HOG_PARAMS)
         features.append(feat)
     return np.array(features)
+
+
+def extract_lbp_features(imgs):
+    """
+    Extracts spatially-encoded LBP (Local Binary Pattern) feature vectors.
+
+    The image is divided into a LBP_GRID x LBP_GRID grid of regions. A
+    normalised histogram of uniform LBP codes is computed per region and
+    concatenated, giving spatial awareness alongside texture information.
+
+    LBP captures loop/curve topology (closed vs open contours) that helps
+    distinguish visually similar digits such as 3, 6, 8, and 9.
+
+    Args:
+        imgs (np.ndarray): Array of grayscale images, shape (N, H, W).
+
+    Returns:
+        np.ndarray: Feature matrix of shape (N, LBP_GRID * LBP_GRID * n_bins).
+    """
+    n_bins = LBP_PARAMS["P"] * (LBP_PARAMS["P"] - 1) + 3  # uniform LBP bin count
+    features = []
+    for img in imgs:
+        lbp = local_binary_pattern(img.astype(np.uint8), **LBP_PARAMS)
+        h, w = img.shape
+        region_h = h // LBP_GRID
+        region_w = w // LBP_GRID
+        hist_features = []
+        for i in range(LBP_GRID):
+            for j in range(LBP_GRID):
+                region = lbp[i * region_h:(i + 1) * region_h,
+                             j * region_w:(j + 1) * region_w]
+                hist, _ = np.histogram(region, bins=n_bins,
+                                       range=(0, n_bins), density=True)
+                hist_features.append(hist)
+        features.append(np.concatenate(hist_features))
+    return np.array(features)
+
+
+def extract_features(imgs):
+    """
+    Extracts combined HOG + LBP feature vectors for digit classification.
+
+    HOG captures edge/gradient structure (shape of the digit).
+    LBP captures local texture topology (open vs closed loops).
+    Together they are more discriminative for visually similar digits.
+
+    Feature vector size:
+      HOG : 9 * 9 * 2 * 2 * 9  = 2,916  (4x4 pixels/cell, 40x40 image)
+      LBP : 4 * 4 * 59          =   944
+      Total                     = 3,860
+
+    Args:
+        imgs (np.ndarray): Array of grayscale images, shape (N, H, W).
+
+    Returns:
+        np.ndarray: Feature matrix of shape (N, 3860).
+    """
+    return np.concatenate([extract_hog_features(imgs),
+                           extract_lbp_features(imgs)], axis=1)
