@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 from skimage.feature import hog, local_binary_pattern
+from preprocessing import *
 
 # HOG parameters — must stay consistent between training and inference
 # pixels_per_cell=(4,4) gives a 10x10 cell grid on a 40x40 image,
@@ -177,22 +178,36 @@ def extract_cells_for_training(image_path, cell_size=40):
     if img is None:
         return None
 
-    blurred = cv2.GaussianBlur(img, (9, 9), 0)
-    thresh = cv2.adaptiveThreshold(
-        blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2
-    )
+    blurred = linear_filter(img, create_gaussian_kernel(9)) # Custom function with the same parameters
+    # blurred = cv2.GaussianBlur(img, (9, 9), 0)
 
+    thresh = apply_adaptive_threshold(blurred, 11, 2, is_inverse=True) # Custom function with the same parameters
+    # thresh = cv2.adaptiveThreshold(
+    #     blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2
+    # )
+    
     # Find the largest quadrilateral contour (the Sudoku grid)
     contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     contours = sorted(contours, key=cv2.contourArea, reverse=True)
 
     grid_contour = None
-    for cnt in contours[:5]:
-        peri = cv2.arcLength(cnt, True)
-        approx = cv2.approxPolyDP(cnt, 0.02 * peri, True)
+    # Custom functions with the same parameters
+    for contour in contours[:5]:
+        contour = contour[:,0,:]
+        perimeter = find_arc_length(contour, is_closed=True)
+        epsilon = 0.02 * perimeter
+        approx = approximate_polygon(contour, epsilon, is_closed=True)
+
         if len(approx) == 4:
             grid_contour = approx
             break
+
+    # for cnt in contours[:5]:
+    #     peri = cv2.arcLength(cnt, True)
+    #     approx = cv2.approxPolyDP(cnt, 0.02 * peri, True)
+    #     if len(approx) == 4:
+    #         grid_contour = approx
+    #         break
 
     if grid_contour is None:
         return None
@@ -219,10 +234,14 @@ def extract_cells_for_training(image_path, cell_size=40):
     warped = cv2.warpPerspective(img, M, (board_size, board_size))
 
     # Threshold the warped board (inverse binary: digit = white)
-    warped_blur = cv2.GaussianBlur(warped, (5, 5), 0)
-    warped_thresh = cv2.adaptiveThreshold(
-        warped_blur, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2
-    )
+    warped_blur = linear_filter(warped, create_gaussian_kernel(5)) # Custom function with the same parameters
+    warped_thresh = apply_adaptive_threshold(warped_blur, 11, 2, is_inverse=True) # Custom function with the same parameters
+    
+    # warped_blur = cv2.GaussianBlur(warped, (5, 5), 0)
+    # warped_thresh = cv2.adaptiveThreshold(
+    #     warped_blur, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2
+    # )
+
 
     # Slice into 81 cells with 10% margin crop (matches Image_Processing.ipynb)
     cell_px = board_size // 9
