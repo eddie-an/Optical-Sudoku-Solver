@@ -5,9 +5,21 @@ Solves Sudoku puzzles using computer vision
 ## Dataset
 [Sudoku Dataset](https://github.com/wichtounet/sudoku_dataset)
 
-If we do the ML approach for digit recognition, this may be good to use:
-[MNIST handwritten digits](https://www.kaggle.com/datasets/hojjatk/mnist-dataset)
+### Digit Recognition Dataset
+We use the [Chars74K EnglishFnt](http://www.ee.surrey.ac.uk/CVSSP/demos/chars74k/) subset — computer-rendered digits across 1,016 fonts, well-matched to printed Sudoku puzzles.
 
+**No manual download required.** Run `DigitRecognition.ipynb` and the first cell will automatically download and extract the dataset into `data/`.
+
+
+## Usage
+
+### To train the digit recognition model
+Run `DigitRecognition.ipynb` — this downloads the required datasets, trains the SVM, and saves the model to `models/digit_model.pkl`.
+
+> **Note:** `models/digit_model.pkl` is not included in the repository (file size exceeds GitHub's 100MB limit). You must generate it by running `DigitRecognition.ipynb` before using `Image_Processing.ipynb`.
+
+### To evaluate digit recognition performance
+Run `Evaluation.ipynb` after `DigitRecognition.ipynb`. Requires `models/digit_model.pkl` and `data/test_puzzles.txt` to exist.
 
 ## Installing dependencies
 Create environment: `python -m venv venv`
