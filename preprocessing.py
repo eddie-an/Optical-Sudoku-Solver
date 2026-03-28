@@ -1,4 +1,8 @@
-__all__ = ["create_gaussian_kernel", "linear_filter", "median_filter", "create_histogram", "find_otsu_threshold", "perform_global_threshold", "apply_adaptive_threshold", "harris_corners", "order_points", "find_arc_length", "find_area", "is_cell_empty", "approximate_polygon", "extract_sudoku_cells", "rotate_board"]
+__all__ = ["create_gaussian_kernel", "linear_filter", "median_filter", 
+           "create_histogram", "find_otsu_threshold", "perform_global_threshold", 
+           "apply_adaptive_threshold", "harris_corners", "order_points", "find_arc_length", 
+           "find_area", "is_cell_empty", "approximate_polygon", "extract_sudoku_cells", "rotate_board", 
+           "warp_perspective_inverse", "warp_perspective_forward"]
 
 import math
 import numpy as np
@@ -519,3 +523,68 @@ def rotate_board(board, angle):
     rotations = {0: 0, 90: 1, 180: 2, 270: 3}
     k = rotations.get(angle, 0)
     return np.rot90(board, k)
+
+
+def warp_perspective_inverse(image, matrix, size):
+    """
+    Applies a perspective transformation to an image given source and destination points.
+    This is used to obtain a top-down view of the Sudoku board for consistent cell extraction.
+    Args:
+        image (numpy array): Input image to be warped.
+        matrix (numpy array): 3x3 perspective transformation matrix.
+        size (tuple): Desired output size (width, height) of the warped image.
+
+    Returns:
+        numpy array: Warped image of the specified size.
+
+    """
+    h, w = size
+    warped_image = np.zeros((h, w), dtype=np.uint8)
+    # get the inverse matrix for mapping destination pixels back to source pixels
+
+    inverse = np.linalg.inv(matrix)
+
+    for row in inverse:
+        print(row)
+
+    for y in range(h):
+        for x in range(w):
+            x_prime = inverse[0, 0] * x + inverse[0, 1] * y + inverse[0, 2]
+            y_prime = inverse[1, 0] * x + inverse[1, 1] * y + inverse[1, 2]
+            w_prime = inverse[2, 0] * x + inverse[2, 1] * y + inverse[2, 2]
+            if w_prime != 0:
+                x_src = int(x_prime / w_prime)
+                y_src = int(y_prime / w_prime)
+                if 0 <= x_src < image.shape[1] and 0 <= y_src < image.shape[0]:
+                    warped_image[y, x] = image[y_src, x_src]
+
+    return warped_image
+
+
+def warp_perspective_forward(image, matrix, size):
+    """
+    Applies a perspective transformation to an image given source and destination points.
+    This is used to obtain a top-down view of the Sudoku board for consistent cell extraction.
+    Args:
+        image (numpy array): Input image to be warped.
+        matrix (numpy array): 3x3 perspective transformation matrix.
+        size (tuple): Desired output size (width, height) of the warped image.
+    Returns:
+        numpy array: Warped image of the specified size.
+    """
+
+    h, w = size
+    warped_image = np.zeros((h, w), dtype=np.uint8)
+
+    for y in range(image.shape[0]):
+        for x in range(image.shape[1]):
+            x_prime = matrix[0, 0] * x + matrix[0, 1] * y + matrix[0, 2]
+            y_prime = matrix[1, 0] * x + matrix[1, 1] * y + matrix[1, 2]
+            w_prime = matrix[2, 0] * x + matrix[2, 1] * y + matrix[2, 2]
+            if w_prime != 0:
+                x_dst = int(x_prime / w_prime)
+                y_dst = int(y_prime / w_prime)
+                if 0 <= x_dst < w and 0 <= y_dst < h:
+                    warped_image[y_dst, x_dst] = image[y, x]
+
+    return warped_image
