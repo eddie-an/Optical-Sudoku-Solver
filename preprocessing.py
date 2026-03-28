@@ -1,4 +1,4 @@
-__all__ = ["create_gaussian_kernel", "linear_filter", "median_filter", "create_histogram", "find_otsu_threshold", "perform_global_threshold", "apply_adaptive_threshold", "harris_corners", "order_points", "find_arc_length", "find_area", "is_cell_empty", "approximate_polygon"]
+__all__ = ["create_gaussian_kernel", "linear_filter", "median_filter", "create_histogram", "find_otsu_threshold", "perform_global_threshold", "apply_adaptive_threshold", "harris_corners", "order_points", "find_arc_length", "find_area", "is_cell_empty", "approximate_polygon", "extract_sudoku_cells", "rotate_board"]
 
 import math
 import numpy as np
@@ -370,33 +370,6 @@ def find_area(coordinates):
     return area / 2
 
 
-def is_cell_empty(cell_image, threshold_percent=0.07):
-    """
-    Determines whether a Sudoku cell is empty based on ink coverage.
-    A 15% margin is cropped from the cell edges before analysis to exclude
-    grid lines from the pixel count.
-    Args:
-        cell_image (numpy array): Inverse binary cell image where ink=255 and paper=0.
-        threshold_percent (float): Ink ratio below which the cell is considered empty.
-                                   Defaults to 0.07 (7% of pixels are ink).
-    Returns:
-        bool: True if the cell is empty, False if it contains a digit.
-    """
-    h, w = cell_image.shape
-    margin = int(h * 0.15)
-    center_crop = cell_image[margin:-margin, margin:-margin] # cropping the margin off the sides to not count sudoku grid lines
-    
-    # Count the number of white pixels (ink)
-    total_pixels = center_crop.size
-    white_pixels = np.count_nonzero(center_crop == 255)
-    
-    # Calculate the percentage of the crop that is ink
-    ink_ratio = white_pixels / total_pixels
-    
-    # If the ink ratio is smaller than our threshold, it's empty
-    return ink_ratio < threshold_percent
-
-
 def approximate_polygon(coordinates, epsilon, is_closed):
     """
     Uses the Ramer–Douglas–Peucker algorithm to reduce the number of coordinate points that represent a curve.
@@ -457,3 +430,92 @@ def approximate_polygon(coordinates, epsilon, is_closed):
         result = _recursive_helper(coordinates, epsilon, True)
         return result[:-1]
     return _recursive_helper(coordinates, epsilon, False)
+
+
+def is_cell_empty(cell_image, threshold_percent=0.07):
+    """
+    Determines whether a Sudoku cell is empty based on ink coverage.
+    A 15% margin is cropped from the cell edges before analysis to exclude
+    grid lines from the pixel count.
+    Args:
+        cell_image (numpy array): Inverse binary cell image where ink=255 and paper=0.
+        threshold_percent (float): Ink ratio below which the cell is considered empty.
+                                   Defaults to 0.07 (7% of pixels are ink).
+    Returns:
+        bool: True if the cell is empty, False if it contains a digit.
+    """
+    h, w = cell_image.shape
+    margin = int(h * 0.15)
+    center_crop = cell_image[margin:-margin, margin:-margin] # cropping the margin off the sides to not count sudoku grid lines
+    
+    # Count the number of white pixels (ink)
+    total_pixels = center_crop.size
+    white_pixels = np.count_nonzero(center_crop == 255)
+    
+    # Calculate the percentage of the crop that is ink
+    ink_ratio = white_pixels / total_pixels
+    
+    # If the ink ratio is smaller than our threshold, it's empty
+    return ink_ratio < threshold_percent
+
+    
+def extract_sudoku_cells(board):
+    """
+    Divides a perspective-corrected Sudoku board into 81 individual cells.
+    Applies Gaussian blur and adaptive thresholding internally to determine
+    which cells are empty. The raw (non-thresholded) cropped cell is returned
+    alongside the empty flag for use by the digit classifier downstream.
+    Args:
+        board (numpy array): Grayscale board image, pre-processed using perspective
+                             transform so that only the Sudoku grid is visible.
+                             Expected to be a square image divisible by 9 (e.g. 450x450).
+    Returns:
+        list: 81 tuples of (cell_image, is_empty) in row-major order, where
+              cell_image is a cropped grayscale cell with grid lines removed,
+              and is_empty is a bool indicating whether the cell contains a digit.
+    """
+    N, M = board.shape
+
+    # Blur and threshold the warped board to get clean binary cells for empty detection
+    blurred_board = linear_filter(board, create_gaussian_kernel(9, 1.6), is_clipped=True)
+    thresh = apply_adaptive_threshold(blurred_board, 11, 2, is_inverse=True)
+
+    cells = []
+    cell_h = N // 9
+    cell_w = M // 9
+
+    for i in range(9):   # Rows
+        for j in range(9):  # Columns
+
+            # Compute pixel boundaries for this cell
+            y_start, y_end = i * cell_h, (i + 1) * cell_h
+            x_start, x_end = j * cell_w, (j + 1) * cell_w
+
+            # Slice the raw (non-thresholded) cell for the classifier
+            cell = board[y_start:y_end, x_start:x_end]
+
+            # Crop 10% margin on all sides to exclude grid lines from the digit region
+            margin_y = int(cell_h * 0.1)
+            margin_x = int(cell_w * 0.1)
+            cell_cropped = cell[margin_y:-margin_y, margin_x:-margin_x]
+
+            # Use the thresholded cell (not the cropped one) for empty detection
+            # since is_cell_empty applies its own internal margin crop
+            isEmpty = is_cell_empty(thresh[y_start:y_end, x_start:x_end], threshold_percent=0.07)
+
+            cells.append((cell_cropped, isEmpty))
+
+    return cells  # 81 (cell_image, is_empty) tuples in row-major order
+
+    
+def rotate_board(board, angle):
+    """Rotates a square board image by a multiple of 90 degrees.
+    Args:
+        board (numpy array): Square grayscale board image.
+        angle (int): Rotation angle, must be one of [0, 90, 180, 270].
+    Returns:
+        numpy array: Rotated board image of the same shape.
+    """
+    rotations = {0: 0, 90: 1, 180: 2, 270: 3}
+    k = rotations.get(angle, 0)
+    return np.rot90(board, k)

@@ -23,9 +23,11 @@ Run `Evaluation.ipynb` after `DigitRecognition.ipynb`. Requires `models/digit_mo
 
 ## Installing dependencies
 Create environment: `python -m venv venv`
+
 Activate it:
 - Windows: `.\venv\Scripts\activate`
 - Mac/Linux: `source venv/bin/activate`
+
 Install your requirements: `pip install -r requirements.txt`
 
 To deactivate virtual environment: `deactivate`
