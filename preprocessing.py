@@ -525,14 +525,92 @@ def rotate_board(board, angle):
     return np.rot90(board, k)
 
 
-def warp_perspective_inverse(image, matrix, size):
+
+def bilinear_interpolate(image, x, y):
+    """
+    Performs bilinear interpolation to compute the pixel value at non-integer coordinates.
+    Uses the four nearest pixel values to calculate a weighted average based on distance.
+    (used only in the custom warp perspective functions, not in the main pipeline since OpenCV's built-in functions are more efficient)
+    Args:
+        image (numpy array): Input image from which to interpolate pixel values.
+        x (float): X-coordinate of the target pixel (can be non-integer).
+        y (float): Y-coordinate of the target pixel (can be non-integer).
+    Returns:
+        int: Interpolated pixel value at (x, y) as an integer in range [0, 255].
+    """
+    x1 = int(np.floor(x))
+    x2 = int(np.ceil(x))
+    y1 = int(np.floor(y))
+    y2 = int(np.ceil(y))
+
+    if x1 == x2 and y1 == y2:
+        return image[y1, x1]
+    
+    Q11 = image[y1, x1] if 0 <= y1 < image.shape[0] and 0 <= x1 < image.shape[1] else 0
+    Q12 = image[y1, x2] if 0 <= y1 < image.shape[0] and 0 <= x2 < image.shape[1] else 0
+    Q21 = image[y2, x1] if 0 <= y2 < image.shape[0] and 0 <= x1 < image.shape[1] else 0
+    Q22 = image[y2, x2] if 0 <= y2 < image.shape[0] and 0 <= x2 < image.shape[1] else 0
+
+    R1 = ((x2 - x) * Q11 + (x - x1) * Q12) if (x2 - x) + (x - x1) != 0 else 0
+    R2 = ((x2 - x) * Q21 + (x - x1) * Q22) if (x2 - x) + (x - x1) != 0 else 0
+
+    P = ((y2 - y) * R1 + (y - y1) * R2) if (y2 - y) + (y - y1) != 0 else 0
+
+    return int(np.clip(P, 0, 255))
+
+
+
+def nearest_neighbor_interpolate(image, x, y):
+    """
+    Performs nearest neighbor interpolation to compute the pixel value at non-integer coordinates.
+    Rounds the coordinates to the nearest integer pixel and returns that pixel's value.
+    (used only in the custom warp perspective functions, not in the main pipeline since OpenCV's built-in functions are more efficient)
+    Args:
+        image (numpy array): Input image from which to interpolate pixel values.
+        x (float): X-coordinate of the target pixel (can be non-integer).
+        y (float): Y-coordinate of the target pixel (can be non-integer).
+    Returns:
+        int: Interpolated pixel value at (x, y) as an integer in range [0, 255].
+    """
+    x_nearest = int(round(x))
+    y_nearest = int(round(y))
+    
+    if 0 <= y_nearest < image.shape[0] and 0 <= x_nearest < image.shape[1]:
+        return image[y_nearest, x_nearest]
+    else:
+        return 0
+    
+
+def int_interpolate(image, x, y):
+    """
+    Performs integer interpolation to compute the pixel value at non-integer coordinates.
+    Rounds the coordinates down to the nearest integer pixel and returns that pixel's value.
+    (used only in the custom warp perspective functions, not in the main pipeline since OpenCV's built-in functions are more efficient)
+    Args:
+        image (numpy array): Input image from which to interpolate pixel values.
+        x (float): X-coordinate of the target pixel (can be non-integer).
+        y (float): Y-coordinate of the target pixel (can be non-integer).
+    Returns:
+        int: Interpolated pixel value at (x, y) as an integer in range [0, 255].
+    """
+    x_int = int(np.floor(x))
+    y_int = int(np.floor(y))
+    
+    if 0 <= y_int < image.shape[0] and 0 <= x_int < image.shape[1]:
+        return image[y_int, x_int]
+    else:
+        return 0
+
+def warp_perspective_inverse(image, matrix, size, interpolation='bilinear'):
     """
     Applies a perspective transformation to an image given source and destination points.
     This is used to obtain a top-down view of the Sudoku board for consistent cell extraction.
+    Uses inverse mapping (backward mapping) with interpolation for smooth results.
     Args:
         image (numpy array): Input image to be warped.
         matrix (numpy array): 3x3 perspective transformation matrix.
         size (tuple): Desired output size (width, height) of the warped image.
+        interpolation (str): Interpolation method: 'bilinear' (default), 'nearest', or 'int'.
 
     Returns:
         numpy array: Warped image of the specified size.
@@ -540,12 +618,18 @@ def warp_perspective_inverse(image, matrix, size):
     """
     h, w = size
     warped_image = np.zeros((h, w), dtype=np.uint8)
-    # get the inverse matrix for mapping destination pixels back to source pixels
-
+    # Get the inverse matrix for mapping destination pixels back to source pixels
     inverse = np.linalg.inv(matrix)
 
-    for row in inverse:
-        print(row)
+    # Select interpolation function
+    if interpolation == 'bilinear':
+        interp_func = bilinear_interpolate
+    elif interpolation == 'nearest':
+        interp_func = nearest_neighbor_interpolate
+    elif interpolation == 'int':
+        interp_func = int_interpolate
+    else:
+        interp_func = bilinear_interpolate  # Default
 
     for y in range(h):
         for x in range(w):
@@ -553,27 +637,32 @@ def warp_perspective_inverse(image, matrix, size):
             y_prime = inverse[1, 0] * x + inverse[1, 1] * y + inverse[1, 2]
             w_prime = inverse[2, 0] * x + inverse[2, 1] * y + inverse[2, 2]
             if w_prime != 0:
-                x_src = int(x_prime / w_prime)
-                y_src = int(y_prime / w_prime)
+                x_src = x_prime / w_prime
+                y_src = y_prime / w_prime
+                # Use interpolation to sample at non-integer coordinates
                 if 0 <= x_src < image.shape[1] and 0 <= y_src < image.shape[0]:
-                    warped_image[y, x] = image[y_src, x_src]
+                    warped_image[y, x] = interp_func(image, x_src, y_src)
 
     return warped_image
 
 
-def warp_perspective_forward(image, matrix, size):
+def warp_perspective_forward(image, matrix, size, interpolation='nearest'):
     """
     Applies a perspective transformation to an image given source and destination points.
+    Uses forward mapping (source-to-destination) which may have gaps.
     This is used to obtain a top-down view of the Sudoku board for consistent cell extraction.
     Args:
         image (numpy array): Input image to be warped.
         matrix (numpy array): 3x3 perspective transformation matrix.
         size (tuple): Desired output size (width, height) of the warped image.
+        interpolation (str): Interpolation method: 'nearest' (default) or 'int'.
     Returns:
         numpy array: Warped image of the specified size.
     """
-
     h, w = size
+    if interpolation not in ('nearest', 'int'):
+        raise ValueError("interpolation must be 'nearest' or 'int' for forward transform")
+
     warped_image = np.zeros((h, w), dtype=np.uint8)
 
     for y in range(image.shape[0]):
@@ -582,9 +671,19 @@ def warp_perspective_forward(image, matrix, size):
             y_prime = matrix[1, 0] * x + matrix[1, 1] * y + matrix[1, 2]
             w_prime = matrix[2, 0] * x + matrix[2, 1] * y + matrix[2, 2]
             if w_prime != 0:
-                x_dst = int(x_prime / w_prime)
-                y_dst = int(y_prime / w_prime)
-                if 0 <= x_dst < w and 0 <= y_dst < h:
-                    warped_image[y_dst, x_dst] = image[y, x]
+                # Normalize by w_prime for perspective divide
+                x_norm = x_prime / w_prime
+                y_norm = y_prime / w_prime
+
+                if interpolation == 'nearest':
+                    x_dst = int(round(x_norm))
+                    y_dst = int(round(y_norm))
+                    if 0 <= x_dst < w and 0 <= y_dst < h:
+                        warped_image[y_dst, x_dst] = image[y, x]
+                else:  # 'int': floor rounding
+                    x_dst = int(x_norm)
+                    y_dst = int(y_norm)
+                    if 0 <= x_dst < w and 0 <= y_dst < h:
+                        warped_image[y_dst, x_dst] = image[y, x]
 
     return warped_image
