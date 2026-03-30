@@ -1,0 +1,102 @@
+\documentclass[10pt,twocolumn,letterpaper]{article}
+
+\usepackage{cvpr}
+\usepackage{times}
+\usepackage{epsfig}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{amssymb}
+
+\usepackage{booktabs}
+\usepackage{multirow}
+
+\usepackage[pagebackref,breaklinks,colorlinks]{hyperref}
+
+\def\cvprPaperID{0000}
+\def\confName{ENEL 4XX}
+\def\confYear{2026}
+
+\title{Optical Sudoku Solver Using Computer Vision and Machine Learning}
+
+\author{
+Edward An\\
+{\tt\small edward.an@ucalgary.ca}
+\and
+Karam Baroud\\
+{\tt\small karam.baroud@ucalgary.ca}
+\and
+Mason Bullock\\
+{\tt\small mason.bullock@ucalgary.ca}
+\and
+Koen Schoffner\\
+{\tt\small koen.schoffner@ucalgary.ca}
+}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+We present an end-to-end optical Sudoku solver that combines classical computer vision techniques with machine learning-based digit recognition. The system processes an input image of a Sudoku puzzle, detects and rectifies the grid using perspective transformation, extracts individual cells, and classifies digits using a Support Vector Machine (SVM) trained on Histogram of Oriented Gradients (HOG) and Local Binary Pattern (LBP) features. To improve robustness, the system includes orientation invariance and adaptive thresholding for handling real-world lighting conditions. Experimental results demonstrate reliable performance on printed Sudoku puzzles under varying image conditions.
+\end{abstract}
+
+\section{Introduction}
+Sudoku is a widely recognized constraint-based puzzle that has become a common benchmark problem for evaluating computer vision pipelines involving detection, segmentation, and classification. Automatically solving Sudoku from images presents several challenges, including perspective distortion, noise, lighting variation, and digit recognition.
+
+In this work, we develop a complete optical Sudoku solver that integrates image preprocessing, geometric transformation, and machine learning. Unlike end-to-end deep learning approaches, our method emphasizes interpretability and modularity by combining classical computer vision algorithms with a lightweight classifier.
+
+\section{Methodology}
+
+\subsection{Preprocessing and Grid Detection}
+The input image is first converted to grayscale and smoothed using a Gaussian filter to reduce noise. We implement Gaussian filtering manually using a generated kernel and convolution operation.
+
+Adaptive thresholding is applied to convert the image into a binary representation. Unlike global thresholding, adaptive thresholding computes a local threshold for each pixel, allowing the system to handle uneven lighting conditions.
+
+Contours are extracted using OpenCV, and the largest quadrilateral contour is assumed to correspond to the Sudoku grid. A polygon approximation algorithm is applied to reduce contour complexity and identify four corner points.
+
+\subsection{Perspective Transformation}
+Once the grid corners are detected, a perspective transformation is applied to obtain a top-down view of the Sudoku board. The board is warped into a fixed square resolution (450×450), enabling consistent downstream processing.
+
+\subsection{Cell Extraction}
+The transformed board is divided into a $9 \times 9$ grid, producing 81 individual cells. Each cell is cropped with margins to remove grid lines.
+
+To determine whether a cell is empty, we compute the ratio of foreground (ink) pixels using adaptive thresholding. Cells with low ink density are classified as empty and skipped during digit recognition.
+
+\subsection{Orientation Invariance}
+To handle images captured at arbitrary rotations, the system evaluates four orientations (0°, 90°, 180°, 270°). For each orientation, digit classification confidence scores are computed using the trained model. The orientation with the highest average confidence is selected as the correct one.
+
+\subsection{Digit Recognition}
+Digit classification is performed using a Support Vector Machine (SVM). Each cell is normalized to a fixed size and centered within a canvas to ensure consistency.
+
+We extract two complementary feature types:
+\begin{itemize}
+    \item \textbf{HOG features:} capture gradient structure and digit shape
+    \item \textbf{LBP features:} capture local texture and topology
+\end{itemize}
+
+The combined feature vector improves discrimination between visually similar digits such as 3, 6, 8, and 9.
+
+\subsection{Sudoku Solving}
+After digit recognition, the partially filled board is validated and solved using a backtracking algorithm. The final solution is displayed if a valid configuration is found.
+
+\section{Results}
+The proposed system successfully detects and solves Sudoku puzzles from real images. Adaptive thresholding improves robustness under non-uniform lighting, while the orientation selection step ensures correct alignment.
+
+The SVM classifier, trained on both synthetic and real-world datasets, achieves strong performance due to the combination of HOG and LBP features. Errors primarily arise from challenging digit cases or poor image quality.
+
+\section{Discussion}
+The modular design allows individual components to be improved independently. For example, digit recognition could be replaced with a convolutional neural network for higher accuracy.
+
+While the system performs well on printed puzzles, handwritten digits or extreme distortions may reduce accuracy. Additionally, contour detection assumes the Sudoku grid is the largest quadrilateral, which may fail in cluttered scenes.
+
+\section{Conclusion}
+We developed a robust optical Sudoku solver that combines classical computer vision techniques with machine learning. The system effectively handles perspective distortion, lighting variation, and digit classification, demonstrating the viability of hybrid approaches for structured visual tasks.
+
+Future work includes extending the system to handwritten Sudoku puzzles and exploring deep learning-based digit recognition models.
+
+{\small
+\bibliographystyle{ieee_fullname}
+\bibliography{egbib}
+}
+
+\end{document}
