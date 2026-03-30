@@ -6,15 +6,13 @@ To compile the report, ensure a LaTeX distribution is installed:
 - Windows: MiKTeX
 - Linux: TeX Live
 
-Then run:
+Then run the following to create the pdf:
 
 `pdflatex report.tex`
 
----
-
 For references (if using BibTeX):
 
-\* and yes you do need to run `pdflatex` 3 times in total.
+\* and yes you do need to run `pdflatex` 3 times in total for some reason.
 
 - `pdflatex report.tex`
 
@@ -25,6 +23,6 @@ For references (if using BibTeX):
 - `pdflatex report.tex`
 
 ---
-Alternatively, you can use latexmk (recommended):
+Alternatively, you can use latexmk for end-to-end flow (recommended):
 
-latexmk -pdf report.tex
+`latexmk -pdf report.tex`
