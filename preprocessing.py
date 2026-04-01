@@ -179,13 +179,15 @@ def find_otsu_threshold(hist_norm):
             best_threshold = i
     return best_threshold
 
-def perform_global_threshold(image, threshold):
+def perform_global_threshold(image, threshold, is_inverse):
     """
     Applies global thresholding to a grayscale image.
     Pixels with intensity above the threshold are set to 255, all others to 0.
     Args:
         image (numpy array): Grayscale image.
         threshold (int): Intensity threshold value in range [0, 255].
+        is_inverse (bool): If True, pixels below the threshold are set to 255 (ink white on black paper).
+                        Useful for contour detection downstream.
     Returns:
         numpy array: Binary image of the same shape as input.
     """
@@ -193,10 +195,16 @@ def perform_global_threshold(image, threshold):
     image_threshold = np.zeros((N, M))
     for i in range(len(image_threshold)):
         for j in range(len(image_threshold[i])):
-            if image[i][j] > threshold:
-                image_threshold[i][j] = 255
+            if is_inverse:
+                if image[i][j] < threshold:
+                    image_threshold[i][j] = 255
+                else:
+                    image_threshold[i][j] = 0
             else:
-                image_threshold[i][j] = 0
+                if image[i][j] >= threshold:
+                    image_threshold[i][j] = 255
+                else:
+                    image_threshold[i][j] = 0
     return image_threshold
 
 @njit
