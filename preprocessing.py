@@ -533,7 +533,7 @@ def rotate_board(board, angle):
     return np.rot90(board, k)
 
 
-
+@njit(cache=True)
 def bilinear_interpolate(image, x, y):
     """
     Performs bilinear interpolation to compute the pixel value at non-integer coordinates.
@@ -564,10 +564,14 @@ def bilinear_interpolate(image, x, y):
 
     P = ((y2 - y) * R1 + (y - y1) * R2) if (y2 - y) + (y - y1) != 0 else 0
 
-    return int(np.clip(P, 0, 255))
+    if P < 0:
+        return 0
+    if P > 255:
+        return 255
+    return int(P)
 
 
-
+@njit(cache=True)
 def nearest_neighbor_interpolate(image, x, y):
     """
     Performs nearest neighbor interpolation to compute the pixel value at non-integer coordinates.
@@ -588,7 +592,7 @@ def nearest_neighbor_interpolate(image, x, y):
     else:
         return 0
     
-
+@njit(cache=True)
 def int_interpolate(image, x, y):
     """
     Performs integer interpolation to compute the pixel value at non-integer coordinates.
@@ -608,7 +612,7 @@ def int_interpolate(image, x, y):
         return image[y_int, x_int]
     else:
         return 0
-
+@njit(cache=True)
 def warp_perspective_inverse(image, matrix, size, interpolation='bilinear'):
     """
     Applies a perspective transformation to an image given source and destination points.
@@ -629,16 +633,6 @@ def warp_perspective_inverse(image, matrix, size, interpolation='bilinear'):
     # Get the inverse matrix for mapping destination pixels back to source pixels
     inverse = np.linalg.inv(matrix)
 
-    # Select interpolation function
-    if interpolation == 'bilinear':
-        interp_func = bilinear_interpolate
-    elif interpolation == 'nearest':
-        interp_func = nearest_neighbor_interpolate
-    elif interpolation == 'int':
-        interp_func = int_interpolate
-    else:
-        interp_func = bilinear_interpolate  # Default
-
     for y in range(h):
         for x in range(w):
             x_prime = inverse[0, 0] * x + inverse[0, 1] * y + inverse[0, 2]
@@ -647,13 +641,17 @@ def warp_perspective_inverse(image, matrix, size, interpolation='bilinear'):
             if w_prime != 0:
                 x_src = x_prime / w_prime
                 y_src = y_prime / w_prime
-                # Use interpolation to sample at non-integer coordinates
                 if 0 <= x_src < image.shape[1] and 0 <= y_src < image.shape[0]:
-                    warped_image[y, x] = interp_func(image, x_src, y_src)
+                    if interpolation == 'nearest':
+                        warped_image[y, x] = nearest_neighbor_interpolate(image, x_src, y_src)
+                    elif interpolation == 'int':
+                        warped_image[y, x] = int_interpolate(image, x_src, y_src)
+                    else:
+                        warped_image[y, x] = bilinear_interpolate(image, x_src, y_src)
 
     return warped_image
 
-
+@njit(cache=True)
 def warp_perspective_forward(image, matrix, size, interpolation='nearest'):
     """
     Applies a perspective transformation to an image given source and destination points.
@@ -679,19 +677,17 @@ def warp_perspective_forward(image, matrix, size, interpolation='nearest'):
             y_prime = matrix[1, 0] * x + matrix[1, 1] * y + matrix[1, 2]
             w_prime = matrix[2, 0] * x + matrix[2, 1] * y + matrix[2, 2]
             if w_prime != 0:
-                # Normalize by w_prime for perspective divide
                 x_norm = x_prime / w_prime
                 y_norm = y_prime / w_prime
 
                 if interpolation == 'nearest':
                     x_dst = int(round(x_norm))
                     y_dst = int(round(y_norm))
-                    if 0 <= x_dst < w and 0 <= y_dst < h:
-                        warped_image[y_dst, x_dst] = image[y, x]
                 else:  # 'int': floor rounding
                     x_dst = int(x_norm)
                     y_dst = int(y_norm)
-                    if 0 <= x_dst < w and 0 <= y_dst < h:
-                        warped_image[y_dst, x_dst] = image[y, x]
+
+                if 0 <= x_dst < w and 0 <= y_dst < h:
+                    warped_image[y_dst, x_dst] = image[y, x]
 
     return warped_image
