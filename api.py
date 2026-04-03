@@ -6,7 +6,7 @@ from skimage.measure import approximate_polygon
 import joblib
 from utils import normalize_cell, extract_features
 from preprocessing import *
-from solver import solve_sudoku, display_board, is_valid_sudoku
+from solver import solve_sudoku, is_valid_sudoku
 
 # Initialize API
 app = FastAPI(title="Optical Sudoku Solver API")
@@ -14,7 +14,10 @@ app = FastAPI(title="Optical Sudoku Solver API")
 # Define allowed origins
 origins = [
     "http://localhost:3000",   # React default
-    "http://localhost:5173"   # Vite default
+    "http://localhost:5173",   # Vite default
+    "http://10.0.0.248:8000",
+    "http://10.0.0.248:19000",
+    "http://10.0.0.248:19006",
 ]
 
 # 2. Add CORSMiddleware to the application
@@ -45,15 +48,17 @@ def recognize_digits(cells):
         board.append(row)
     return board
 
-@app.post("/solve/")
+@app.post("/solve")
 async def solve(file: UploadFile = File(...)):
-    # 1. Read the uploaded image file into memory
+    # Read the uploaded image file into memory
     contents = await file.read()
     nparr = np.frombuffer(contents, np.uint8)
     image = cv2.imdecode(nparr, cv2.IMREAD_GRAYSCALE)
 
-    # 2. Run your pipeline
+    # Pipeline
     try:
+        if image.mean() < 127:
+            image = cv2.bitwise_not(image) # Replace this with custom implementation
         original = image.copy()
         gaussian_kernel = create_gaussian_kernel(9, 1.6)
         blurred = linear_filter(image, gaussian_kernel, is_clipped=True)
@@ -65,7 +70,6 @@ async def solve(file: UploadFile = File(...)):
         contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE) # Suzuki Abe algorithm
         contours = sorted(contours, key=cv2.contourArea, reverse=True)
 
-        # These are the functions you wrote!
         grid_contour = None
         for contour in contours[:5]:
             contour = contour[:,0,:]
@@ -111,17 +115,16 @@ async def solve(file: UploadFile = File(...)):
                 
         rotation_scores = dict(sorted(rotation_scores.items(), key=lambda item: item[1], reverse=True))
 
+        board = None
         for angle, score in rotation_scores.items():
             final_board_img = rotate_board(board_img, angle)
             final_cells = extract_sudoku_cells(final_board_img)
             board = recognize_digits(final_cells)
-            print(f"Checking {angle} degrees with score: {score}")
-            display_board(board)
             if is_valid_sudoku(board):
                 print(f"{angle} degrees is valid")
                 break
 
-        if not is_valid_sudoku(board):
+        if board is None or not is_valid_sudoku(board):
             raise ValueError("Invalid board — digit recognition may have errors or the board is impossible to solve.")
 
         given = [[cell != "." for cell in row] for row in board]
