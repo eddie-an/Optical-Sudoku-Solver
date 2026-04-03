@@ -2,7 +2,7 @@ __all__ = ["create_gaussian_kernel", "linear_filter", "median_filter",
            "create_histogram", "find_otsu_threshold", "perform_global_threshold", 
            "apply_adaptive_threshold", "harris_corners", "order_points", "find_arc_length", 
            "find_area", "is_cell_empty", "approximate_polygon", "extract_sudoku_cells", "rotate_board", 
-           "warp_perspective_inverse", "warp_perspective_forward"]
+           "warp_perspective_inverse", "warp_perspective_forward", "get_perspective_transform"]
 
 import math
 import numpy as np
@@ -695,3 +695,29 @@ def warp_perspective_forward(image, matrix, size, interpolation='nearest'):
                         warped_image[y_dst, x_dst] = image[y, x]
 
     return warped_image
+
+def get_perspective_transform(src, dest):
+    """
+    Computes 3x3 perspective transformation matrix which maps four source points to four destination points.
+    Solves for the homography matrix, H, so that for each pair or corresponding points (x,y) in src and (u,v)
+    in dest, the following holds in homogeneous coordinates:
+    [u, v, 1]^T ~ H * [x, y, 1]^T
+
+    Args:
+        src (numpy array): 4x2 array of four source points (x, y).
+        dest (numpy array): 4x2 array of four destination points (u, v).
+
+    Returns:
+        numpy array: 3x3 perspective transformation matrix.
+    """
+    A = []
+    for i in range(4):
+        x, y = src[i][0], src[i][1]
+        u, v = dest[i][0], dest[i][1]
+        A.append([-x, -y, -1, 0, 0, 0, x*u, y*u, u])
+        A.append([0, 0, 0, -x, -y, -1, x*v, y*v, v])
+    A = np.array(A)
+    U, S, vt = np.linalg.svd(A)
+    H = vt[-1].reshape(3, 3)
+    H = H/H[2,2]
+    return H
