@@ -64,54 +64,6 @@ def solve_sudoku(board):
 
     _backtrack(0, 0)
 
-
-def solve_sudoku_2(board):
-    rows = [set() for _ in range(9)]
-    cols = [set() for _ in range(9)]
-    boxes = [set() for _ in range(9)]
-
-    empties = []
-
-    for i in range(9):
-        for j in range(9):
-            if board[i][j] == '.':
-                empties.append((i,j))
-            else:
-                val = int(board[i][j])
-                rows[i].add(val)
-                cols[j].add(val)
-                boxes[(i//3)*3 + (j//3)].add(val)
-
-    def candidates(r, c):
-        return {1,2,3,4,5,6,7,8,9} - rows[r] - cols[c] - boxes[(r//3)*3 + (c//3)]
-
-    def backtrack():
-        if not empties:
-            return True
-
-        # Pick the empty cell with fewest candidates
-        empties.sort(key=lambda x: len(candidates(x[0], x[1])))
-        r, c = empties.pop(0)
-
-        for num in candidates(r, c):
-            board[r][c] = str(num)
-            rows[r].add(num)
-            cols[c].add(num)
-            boxes[(r//3)*3 + (c//3)].add(num)
-
-            if backtrack():
-                return True
-
-            board[r][c] = '.'
-            rows[r].remove(num)
-            cols[c].remove(num)
-            boxes[(r//3)*3 + (c//3)].remove(num)
-
-        empties.insert(0, (r,c))
-        return False
-
-    backtrack()
-
 def display_board(board):
     for i in range(9):
         for j in range(9):
