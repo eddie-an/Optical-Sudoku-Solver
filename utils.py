@@ -1,3 +1,6 @@
+import json
+import os
+
 import cv2
 import numpy as np
 from skimage.feature import hog, local_binary_pattern
@@ -50,16 +53,16 @@ def normalize_cell(img, canvas_size=40, padding=4):
     # Threshold to clean binary
     _, binary = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
-    # # Morphological opening: erode then dilate to remove small isolated blobs
-    # kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
-    # binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
+    # Morphological opening: erode then dilate to remove small isolated blobs
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+    binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
 
-    # # Keep only the largest connected component (removes grid lines and fragments)
-    # num_labels, labels_map, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
-    # if num_labels > 1:
-    #     # stats[0] is the background — find the largest foreground component
-    #     largest = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
-    #     binary = np.where(labels_map == largest, 255, 0).astype(np.uint8)
+    # Keep only the largest connected component (removes grid lines and fragments)
+    num_labels, labels_map, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
+    if num_labels > 1:
+        # stats[0] is the background — find the largest foreground component
+        largest = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
+        binary = np.where(labels_map == largest, 255, 0).astype(np.uint8)
 
     # Find bounding box of digit pixels
     coords = cv2.findNonZero(binary)
@@ -160,6 +163,173 @@ def parse_dat_file(dat_path):
     return grid
 
 
+def _extract_cells_for_training_debug(image_path, cell_size=40):
+    """
+    Runs the training-time Sudoku cell extraction pipeline and returns
+    intermediate images for debugging.
+
+    Args:
+        image_path (str): Path to a Sudoku puzzle image.
+        cell_size (int): Output cell size in pixels.
+
+    Returns:
+        dict: Extraction artifacts and metadata. If grid detection fails,
+              ``cells`` is None and ``grid_contour`` is None.
+    """
+    img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+    if img is None:
+        return {
+            "image_path": image_path,
+            "original": None,
+            "blurred": None,
+            "thresh": None,
+            "grid_contour": None,
+            "contour_overlay": None,
+            "ordered_corners": None,
+            "warped": None,
+            "warped_blur": None,
+            "warped_thresh": None,
+            "cells": None,
+            "cell_debug": [],
+            "board_size": 450,
+            "cell_px": None,
+            "margin": None,
+            "error": f"Could not read image: {image_path}",
+        }
+
+    blurred = linear_filter(img, create_gaussian_kernel(9))
+    thresh = apply_adaptive_threshold(blurred, 11, 2, is_inverse=True)
+
+    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours = sorted(contours, key=cv2.contourArea, reverse=True)
+
+    grid_contour = None
+    for contour in contours[:5]:
+        contour = contour[:, 0, :]
+        perimeter = find_arc_length(contour, is_closed=True)
+        epsilon = 0.02 * perimeter
+        approx = approximate_polygon(contour, epsilon, is_closed=True)
+
+        if len(approx) == 4:
+            grid_contour = approx
+            break
+
+    contour_overlay = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+    if grid_contour is None:
+        return {
+            "image_path": image_path,
+            "original": img,
+            "blurred": blurred,
+            "thresh": thresh,
+            "grid_contour": None,
+            "contour_overlay": contour_overlay,
+            "ordered_corners": None,
+            "warped": None,
+            "warped_blur": None,
+            "warped_thresh": None,
+            "cells": None,
+            "cell_debug": [],
+            "board_size": 450,
+            "cell_px": None,
+            "margin": None,
+            "error": "Could not find a 4-corner Sudoku grid contour.",
+        }
+
+    cv2.drawContours(contour_overlay, [grid_contour.astype(np.int32)], -1, (0, 255, 0), 3)
+
+    pts = grid_contour.reshape(4, 2).astype(np.float32)
+    s = pts.sum(axis=1)
+    diff = np.diff(pts, axis=1).flatten()
+    ordered = np.array([
+        pts[np.argmin(s)],
+        pts[np.argmin(diff)],
+        pts[np.argmax(s)],
+        pts[np.argmax(diff)],
+    ], dtype=np.float32)
+
+    board_size = 450
+    dst = np.array([
+        [0, 0], [board_size - 1, 0],
+        [board_size - 1, board_size - 1], [0, board_size - 1]
+    ], dtype=np.float32)
+    M = cv2.getPerspectiveTransform(ordered, dst)
+    warped = cv2.warpPerspective(img, M, (board_size, board_size))
+
+    warped_blur = linear_filter(warped, create_gaussian_kernel(5))
+    warped_thresh = apply_adaptive_threshold(warped_blur, 11, 2, is_inverse=True)
+
+    cell_px = board_size // 9
+    margin = int(cell_px * 0.1)
+    cells = []
+    cell_debug = []
+    empty_cell_count = 0
+    for row in range(9):
+        for col in range(9):
+            raw_cell = warped_thresh[row * cell_px:(row + 1) * cell_px,
+                                     col * cell_px:(col + 1) * cell_px]
+            cropped_cell = raw_cell[margin:-margin, margin:-margin]
+            resized_cell = cv2.resize(cropped_cell, (cell_size, cell_size))
+            normalized_cell = normalize_cell(resized_cell)
+            ink_ratio = float(np.count_nonzero(resized_cell == 255) / resized_cell.size)
+            is_empty = is_cell_empty(raw_cell, threshold_percent=0.07)
+            normalization_failed = normalized_cell.max() == 0
+
+            if is_empty:
+                empty_cell_count += 1
+
+            cells.append(resized_cell)
+            cell_debug.append({
+                "row": row,
+                "col": col,
+                "raw_cell": raw_cell,
+                "cropped_cell": cropped_cell,
+                "resized_cell": resized_cell,
+                "normalized_cell": normalized_cell,
+                "ink_ratio": ink_ratio,
+                "is_empty": is_empty,
+                "normalization_failed": normalization_failed,
+            })
+
+    if empty_cell_count == 81:
+        return {
+            "image_path": image_path,
+            "original": img,
+            "blurred": blurred,
+            "thresh": thresh,
+            "grid_contour": grid_contour,
+            "contour_overlay": contour_overlay,
+            "ordered_corners": ordered,
+            "warped": warped,
+            "warped_blur": warped_blur,
+            "warped_thresh": warped_thresh,
+            "cells": None,
+            "cell_debug": cell_debug,
+            "board_size": board_size,
+            "cell_px": cell_px,
+            "margin": margin,
+            "error": "Grid contour was found, but all 81 extracted cells were classified as empty.",
+        }
+
+    return {
+        "image_path": image_path,
+        "original": img,
+        "blurred": blurred,
+        "thresh": thresh,
+        "grid_contour": grid_contour,
+        "contour_overlay": contour_overlay,
+        "ordered_corners": ordered,
+        "warped": warped,
+        "warped_blur": warped_blur,
+        "warped_thresh": warped_thresh,
+        "cells": cells,
+        "cell_debug": cell_debug,
+        "board_size": board_size,
+        "cell_px": cell_px,
+        "margin": margin,
+        "error": None,
+    }
+
+
 def extract_cells_for_training(image_path, cell_size=40):
     """
     Minimal cell extractor for mining training data from the Sudoku dataset.
@@ -174,87 +344,270 @@ def extract_cells_for_training(image_path, cell_size=40):
         list[np.ndarray] | None: 81 cell images in row-major order (white digit on black
         background), or None if the grid could not be detected.
     """
-    img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
-    if img is None:
+    debug_data = _extract_cells_for_training_debug(image_path, cell_size=cell_size)
+    return debug_data["cells"]
+
+
+def show_training_cell_extraction_debug(image_path, cell_size=40, suspect_ink_ratio=0.02):
+    """
+    Displays the original Sudoku image alongside extraction intermediates and
+    the 81 extracted cells used by the training pipeline.
+
+    Cells are highlighted when normalization produced a blank result or when
+    the extracted cell contains very little ink, which helps explain why some
+    samples are being dropped.
+
+    Args:
+        image_path (str): Path to the Sudoku puzzle image to inspect.
+        cell_size (int): Output cell size used by the extractor.
+        suspect_ink_ratio (float): Cells below this ink ratio are marked as
+                                   suspicious.
+
+    Returns:
+        dict: Debug metadata and intermediate images from the extractor.
+    """
+    import matplotlib.pyplot as plt
+
+    debug_data = _extract_cells_for_training_debug(image_path, cell_size=cell_size)
+
+    fig = plt.figure(figsize=(20, 14))
+    gs = fig.add_gridspec(3, 2, height_ratios=[1, 1, 2.6])
+
+    overview_items = [
+        ("Original", debug_data["original"]),
+        ("Grid contour", debug_data["contour_overlay"]),
+        ("Initial threshold", debug_data["thresh"]),
+        ("Warped board", debug_data["warped"]),
+    ]
+
+    for idx, (title, image) in enumerate(overview_items):
+        ax = fig.add_subplot(gs[idx // 2, idx % 2])
+        ax.set_title(title)
+        if image is None:
+            ax.text(0.5, 0.5, "Unavailable", ha="center", va="center", fontsize=12)
+        elif image.ndim == 2:
+            ax.imshow(image, cmap="gray", vmin=0, vmax=255)
+        else:
+            ax.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+        ax.axis("off")
+
+    cell_grid = gs[2, :].subgridspec(9, 9, wspace=0.05, hspace=0.25)
+    suspicious = []
+    for idx in range(81):
+        cell_info = debug_data["cell_debug"][idx] if debug_data["cell_debug"] else None
+        ax = fig.add_subplot(cell_grid[idx // 9, idx % 9])
+
+        if cell_info is None:
+            ax.text(0.5, 0.5, "N/A", ha="center", va="center", fontsize=8)
+            ax.axis("off")
+            continue
+
+        ax.imshow(cell_info["resized_cell"], cmap="gray", vmin=0, vmax=255)
+        title = f"{cell_info['row'] + 1},{cell_info['col'] + 1}"
+        is_suspicious = (
+            cell_info["normalization_failed"] or
+            cell_info["ink_ratio"] < suspect_ink_ratio
+        )
+        if is_suspicious:
+            title += " !"
+            suspicious.append(cell_info)
+            for spine in ax.spines.values():
+                spine.set_color("crimson")
+                spine.set_linewidth(2)
+
+        ax.set_title(title, fontsize=8, pad=2)
+        ax.axis("off")
+
+    if debug_data["error"] is not None:
+        fig.suptitle(
+            f"{image_path}\n{debug_data['error']}",
+            fontsize=14,
+            y=0.98,
+        )
+    else:
+        fig.suptitle(
+            f"{image_path}\nSuspicious cells: {len(suspicious)} / 81",
+            fontsize=14,
+            y=0.98,
+        )
+
+    plt.tight_layout()
+    plt.show()
+
+    if suspicious:
+        print("Suspicious cells")
+        for cell_info in suspicious:
+            reasons = []
+            if cell_info["normalization_failed"]:
+                reasons.append("normalize_cell returned blank")
+            if cell_info["ink_ratio"] < suspect_ink_ratio:
+                reasons.append(f"low ink ratio ({cell_info['ink_ratio']:.3f})")
+            print(
+                f"  r{cell_info['row'] + 1} c{cell_info['col'] + 1}: "
+                + ", ".join(reasons)
+            )
+    elif debug_data["error"] is None:
+        print("No suspicious cells detected by the heuristic.")
+
+    return debug_data
+
+
+class TrainingImageDebugBrowser:
+    """
+    Lightweight notebook-friendly browser for stepping through Sudoku dataset
+    images, reusing the training-time extraction debug view and persisting
+    which images have already been inspected.
+    """
+
+    def __init__(
+        self,
+        dataset_dir,
+        history_path=None,
+        cell_size=40,
+        suspect_ink_ratio=0.02,
+        image_extensions=(".jpg", ".jpeg", ".png", ".bmp"),
+    ):
+        self.dataset_dir = dataset_dir
+        self.history_path = history_path or os.path.join(
+            dataset_dir, ".viewed_debug_images.json"
+        )
+        self.cell_size = cell_size
+        self.suspect_ink_ratio = suspect_ink_ratio
+        self.image_extensions = tuple(ext.lower() for ext in image_extensions)
+        self.image_names = sorted([
+            name for name in os.listdir(dataset_dir)
+            if name.lower().endswith(self.image_extensions)
+        ])
+        if not self.image_names:
+            raise ValueError(f"No images found in dataset directory: {dataset_dir}")
+
+        self.current_index = 0
+        self.viewed = self._load_history()
+
+    def _load_history(self):
+        if not os.path.exists(self.history_path):
+            return set()
+        try:
+            with open(self.history_path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+            return set(payload.get("viewed", []))
+        except (json.JSONDecodeError, OSError):
+            return set()
+
+    def _save_history(self):
+        payload = {
+            "dataset_dir": self.dataset_dir,
+            "viewed": sorted(self.viewed),
+        }
+        with open(self.history_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
+
+    def _resolve_index(self, index=None, image_name=None):
+        if image_name is not None:
+            if image_name not in self.image_names:
+                raise ValueError(f"Image not found in dataset: {image_name}")
+            return self.image_names.index(image_name)
+        if index is None:
+            return self.current_index
+        if not 0 <= index < len(self.image_names):
+            raise IndexError(f"Index {index} is out of range for {len(self.image_names)} images.")
+        return index
+
+    def _print_status(self):
+        current_name = self.image_names[self.current_index]
+        viewed_count = len(self.viewed)
+        total = len(self.image_names)
+        unseen_indices = [
+            idx for idx, name in enumerate(self.image_names)
+            if name not in self.viewed
+        ]
+        next_unseen = unseen_indices[0] if unseen_indices else None
+
+        print(
+            f"Current: [{self.current_index}] {current_name}\n"
+            f"Viewed: {viewed_count}/{total}\n"
+            f"History: {self.history_path}"
+        )
+        if next_unseen is not None:
+            print(f"Next unseen: [{next_unseen}] {self.image_names[next_unseen]}")
+        else:
+            print("Next unseen: none")
+
+    def list_images(self, start=None, limit=20, only_unseen=False):
+        """
+        Prints a compact window of dataset images with seen/unseen markers.
+        """
+        if start is None:
+            start = max(0, self.current_index - limit // 2)
+
+        end = min(len(self.image_names), start + limit)
+        for idx in range(start, end):
+            name = self.image_names[idx]
+            if only_unseen and name in self.viewed:
+                continue
+            marker = "x" if name in self.viewed else " "
+            current = ">" if idx == self.current_index else " "
+            print(f"{current} [{idx:04d}] [{marker}] {name}")
+
+    def show(self, index=None, image_name=None, mark_viewed=True):
+        """
+        Shows the selected image with extraction debug output.
+        """
+        resolved_index = self._resolve_index(index=index, image_name=image_name)
+        self.current_index = resolved_index
+        image_name = self.image_names[resolved_index]
+        image_path = os.path.join(self.dataset_dir, image_name)
+
+        debug_data = show_training_cell_extraction_debug(
+            image_path,
+            cell_size=self.cell_size,
+            suspect_ink_ratio=self.suspect_ink_ratio,
+        )
+
+        if mark_viewed:
+            self.viewed.add(image_name)
+            self._save_history()
+
+        self._print_status()
+        return debug_data
+
+    def next(self, step=1):
+        return self.show(index=min(self.current_index + step, len(self.image_names) - 1))
+
+    def prev(self, step=1):
+        return self.show(index=max(self.current_index - step, 0))
+
+    def next_unseen(self):
+        for idx in range(self.current_index + 1, len(self.image_names)):
+            if self.image_names[idx] not in self.viewed:
+                return self.show(index=idx)
+        for idx in range(0, self.current_index + 1):
+            if self.image_names[idx] not in self.viewed:
+                return self.show(index=idx)
+        print("All dataset images have been viewed.")
         return None
 
-    blurred = linear_filter(img, create_gaussian_kernel(9)) # Custom function with the same parameters
-    # blurred = cv2.GaussianBlur(img, (9, 9), 0)
+    def random_unseen(self, rng=None):
+        unseen = [name for name in self.image_names if name not in self.viewed]
+        if not unseen:
+            print("All dataset images have been viewed.")
+            return None
+        if rng is None:
+            rng = np.random.default_rng()
+        image_name = unseen[int(rng.integers(0, len(unseen)))]
+        return self.show(image_name=image_name)
 
-    thresh = apply_adaptive_threshold(blurred, 11, 2, is_inverse=True) # Custom function with the same parameters
-    # thresh = cv2.adaptiveThreshold(
-    #     blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2
-    # )
-    
-    # Find the largest quadrilateral contour (the Sudoku grid)
-    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    contours = sorted(contours, key=cv2.contourArea, reverse=True)
+    def mark_unviewed(self, index=None, image_name=None):
+        resolved_index = self._resolve_index(index=index, image_name=image_name)
+        image_name = self.image_names[resolved_index]
+        self.viewed.discard(image_name)
+        self._save_history()
+        print(f"Marked unviewed: [{resolved_index}] {image_name}")
 
-    grid_contour = None
-    # Custom functions with the same parameters
-    for contour in contours[:5]:
-        contour = contour[:,0,:]
-        perimeter = find_arc_length(contour, is_closed=True)
-        epsilon = 0.02 * perimeter
-        approx = approximate_polygon(contour, epsilon, is_closed=True)
-
-        if len(approx) == 4:
-            grid_contour = approx
-            break
-
-    # for cnt in contours[:5]:
-    #     peri = cv2.arcLength(cnt, True)
-    #     approx = cv2.approxPolyDP(cnt, 0.02 * peri, True)
-    #     if len(approx) == 4:
-    #         grid_contour = approx
-    #         break
-
-    if grid_contour is None:
-        return None
-
-    # Order corners: top-left, top-right, bottom-right, bottom-left
-    # np.diff gives y-x per point: argmin = top-right, argmax = bottom-left
-    pts = grid_contour.reshape(4, 2).astype(np.float32)
-    s = pts.sum(axis=1)
-    diff = np.diff(pts, axis=1).flatten()
-    ordered = np.array([
-        pts[np.argmin(s)],    # top-left
-        pts[np.argmin(diff)], # top-right
-        pts[np.argmax(s)],    # bottom-right
-        pts[np.argmax(diff)], # bottom-left
-    ], dtype=np.float32)
-
-    # Perspective warp to a fixed square board
-    board_size = 450
-    dst = np.array([
-        [0, 0], [board_size - 1, 0],
-        [board_size - 1, board_size - 1], [0, board_size - 1]
-    ], dtype=np.float32)
-    M = cv2.getPerspectiveTransform(ordered, dst)
-    warped = cv2.warpPerspective(img, M, (board_size, board_size))
-
-    # Threshold the warped board (inverse binary: digit = white)
-    warped_blur = linear_filter(warped, create_gaussian_kernel(5)) # Custom function with the same parameters
-    warped_thresh = apply_adaptive_threshold(warped_blur, 11, 2, is_inverse=True) # Custom function with the same parameters
-    
-    # warped_blur = cv2.GaussianBlur(warped, (5, 5), 0)
-    # warped_thresh = cv2.adaptiveThreshold(
-    #     warped_blur, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2
-    # )
-
-
-    # Slice into 81 cells with 10% margin crop (matches Image_Processing.ipynb)
-    cell_px = board_size // 9
-    margin = int(cell_px * 0.1)
-    cells = []
-    for i in range(9):
-        for j in range(9):
-            cell = warped_thresh[i * cell_px:(i + 1) * cell_px,
-                                 j * cell_px:(j + 1) * cell_px]
-            cell = cell[margin:-margin, margin:-margin]
-            cells.append(cv2.resize(cell, (cell_size, cell_size)))
-
-    return cells  # 81 images, row-major order, white digit on black background
+    def reset_history(self):
+        self.viewed.clear()
+        self._save_history()
+        print(f"Cleared viewed history: {self.history_path}")
 
 
 def extract_hog_features(imgs):
