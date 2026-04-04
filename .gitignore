@@ -8,7 +8,7 @@ venv/
 .ipynb_checkpoints/
 
 data/
-models/
+models/*.pkl
 
 
 # Latex
