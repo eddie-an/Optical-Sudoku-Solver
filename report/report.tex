@@ -97,13 +97,17 @@ These four corner points are then used for perspective transformation to obtain 
 Once the grid corners are detected, a perspective transformation is applied to obtain a top-down view of the Sudoku board. The board is warped into a fixed square resolution (450x450), enabling consistent downstream processing.
 The perspective transformation is computed using the four detected corner points and the corresponding points in the output image. The transformation matrix is calculated using OpenCV's \texttt{getPerspectiveTransform} function, and the image is warped using \texttt{warpPerspective}.
 
-In order to prevent holes in the warped image, we use inverse perspective warping. This approach ensures that every pixel in the output image is assigned a value based on the corresponding location in the input image, avoiding gaps that can occur with forward mapping.
+One caveat to perspective transformation is that it can create holes in the output image if forward mapping is used, as some pixels in the output may not correspond to any pixel in the input. Forward warping maps each pixel from the input to the output, which can lead to gaps if multiple input pixels map to the same output pixel or if some output pixels do not receive any input mapping. In contrast, inverse warping maps each pixel in the output back to the input, ensuring that every pixel in the output is assigned a value based on the corresponding location in the input image, thus avoiding holes. 
+Since during the perspective transformation process can result in pixel coordinates having decimal values attached to them, these methods also rely on an interpolation method to get integer coordinates. We tested 2 methods of interpolation with both inverse and forward warping. These methods were 1) just taking the integer value and 2) rounding to the nearest integer. A third interpolation method was tested (bilinear), but only with inverse mapping since implementing it into forward warping would be significantly more complex since there are cases where multiple pixels from the original image could get mapped to the same pixel in the new one.  As seen in Figure 4 below, these tests resulted in us using a combination of inverse warping using bilinear interpolation. 
 
 \begin{figure}[ht]
     \centering
-    \includegraphics[width=0.22\textwidth]{images/forward_warping.png}
-    \includegraphics[width=0.22\textwidth]{images/inverse_warping.png}
-    \caption{Perspective transformation result showing the forward warped image (left) and the inverse warped top-down view of the Sudoku board (right).}
+    \includegraphics[width=0.22\textwidth]{images/forward_int.png}
+    \includegraphics[width=0.22\textwidth]{images/inverse_int.png}
+    \includegraphics[width=0.22\textwidth]{images/forward_round.png}
+    \includegraphics[width=0.22\textwidth]{images/inverse_round.png}
+    \includegraphics[width=0.22\textwidth]{images/inverse_bilinear.png}
+    \caption{Perspective transformation results showing the forward warped image (left column) and the inverse warped top-down view of the Sudoku board (right column) with different interpolation methods (from top row to bottom row: integer value, rounding, and bilinear).}
     \label{fig:perspective_transform}
 \end{figure}
 
