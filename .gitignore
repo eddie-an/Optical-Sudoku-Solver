@@ -4,10 +4,11 @@ __pycache__
 *.pyc
 
 venv/
+.venv/
 .ipynb_checkpoints/
 
 data/
-models/
+models/*.pkl
 
 
 # Latex
