@@ -1,7 +1,7 @@
 __all__ = ["create_gaussian_kernel", "linear_filter", "median_filter", 
            "create_histogram", "find_otsu_threshold", "perform_global_threshold", 
            "apply_adaptive_threshold", "harris_corners", "order_points", "find_arc_length", 
-           "find_area", "is_cell_empty", "approximate_polygon", "extract_sudoku_cells", "rotate_board", 
+           "find_area", "is_cell_empty", "approximate_polygon", "rotate_board", 
            "warp_perspective_inverse", "warp_perspective_forward", "get_perspective_transform"]
 
 import math
@@ -179,7 +179,7 @@ def find_otsu_threshold(hist_norm):
             best_threshold = i
     return best_threshold
 
-def perform_global_threshold(image, threshold, is_inverse):
+def perform_global_threshold(image, threshold, is_inverse=False):
     """
     Applies global thresholding to a grayscale image.
     Pixels with intensity above the threshold are set to 255, all others to 0.
@@ -444,20 +444,26 @@ def approximate_polygon(coordinates, epsilon, is_closed):
     return _recursive_helper(coordinates, epsilon, False)
 
 
-def is_cell_empty(cell_image, threshold_percent=0.07):
+def is_cell_empty(cell_image, threshold_percent=0.07, margin_percent=0.15):
     """
     Determines whether a Sudoku cell is empty based on ink coverage.
-    A 15% margin is cropped from the cell edges before analysis to exclude
+    Some margin is cropped from the cell edges before analysis to exclude
     grid lines from the pixel count.
     Args:
         cell_image (numpy array): Inverse binary cell image where ink=255 and paper=0.
         threshold_percent (float): Ink ratio below which the cell is considered empty.
                                    Defaults to 0.07 (7% of pixels are ink).
+        margin_percent (float): Percentage of pixels to crop off from the sides to avoid counting sudoku grid lines.
+                                Defaults to 0.15 (15% of pixels at the edges are not counted).
     Returns:
         bool: True if the cell is empty, False if it contains a digit.
     """
+    if margin_percent > 0.4 or margin_percent < 0:
+        raise ValueError("Margin percent must be between 0 and 0.4 (inclusive)")
+    if threshold_percent > 1 or threshold_percent < 0:
+        raise ValueError("Threshold percent must be between 0 and 1 (inclusive)")
     h, w = cell_image.shape
-    margin = int(h * 0.15)
+    margin = int(h * margin_percent)
     center_crop = cell_image[margin:-margin, margin:-margin] # cropping the margin off the sides to not count sudoku grid lines
     
     # Count the number of white pixels (ink)
@@ -469,55 +475,6 @@ def is_cell_empty(cell_image, threshold_percent=0.07):
     
     # If the ink ratio is smaller than our threshold, it's empty
     return ink_ratio < threshold_percent
-
-    
-def extract_sudoku_cells(board):
-    """
-    Divides a perspective-corrected Sudoku board into 81 individual cells.
-    Applies Gaussian blur and adaptive thresholding internally to determine
-    which cells are empty. The raw (non-thresholded) cropped cell is returned
-    alongside the empty flag for use by the digit classifier downstream.
-    Args:
-        board (numpy array): Grayscale board image, pre-processed using perspective
-                             transform so that only the Sudoku grid is visible.
-                             Expected to be a square image divisible by 9 (e.g. 450x450).
-    Returns:
-        list: 81 tuples of (cell_image, is_empty) in row-major order, where
-              cell_image is a cropped grayscale cell with grid lines removed,
-              and is_empty is a bool indicating whether the cell contains a digit.
-    """
-    N, M = board.shape
-
-    # Blur and threshold the warped board to get clean binary cells for empty detection
-    blurred_board = linear_filter(board, create_gaussian_kernel(9, 1.6), is_clipped=True)
-    thresh = apply_adaptive_threshold(blurred_board, 11, 2, is_inverse=True)
-
-    cells = []
-    cell_h = N // 9
-    cell_w = M // 9
-
-    for i in range(9):   # Rows
-        for j in range(9):  # Columns
-
-            # Compute pixel boundaries for this cell
-            y_start, y_end = i * cell_h, (i + 1) * cell_h
-            x_start, x_end = j * cell_w, (j + 1) * cell_w
-
-            # Slice the raw (non-thresholded) cell for the classifier
-            cell = board[y_start:y_end, x_start:x_end]
-
-            # Crop 10% margin on all sides to exclude grid lines from the digit region
-            margin_y = int(cell_h * 0.1)
-            margin_x = int(cell_w * 0.1)
-            cell_cropped = cell[margin_y:-margin_y, margin_x:-margin_x]
-
-            # Use the thresholded cell (not the cropped one) for empty detection
-            # since is_cell_empty applies its own internal margin crop
-            isEmpty = is_cell_empty(thresh[y_start:y_end, x_start:x_end], threshold_percent=0.07)
-
-            cells.append((cell_cropped, isEmpty))
-
-    return cells  # 81 (cell_image, is_empty) tuples in row-major order
 
     
 def rotate_board(board, angle):
@@ -534,7 +491,7 @@ def rotate_board(board, angle):
 
 
 @njit(cache=True)
-def bilinear_interpolate(image, x, y):
+def _bilinear_interpolate(image, x, y):
     """
     Performs bilinear interpolation to compute the pixel value at non-integer coordinates.
     Uses the four nearest pixel values to calculate a weighted average based on distance.
@@ -572,7 +529,7 @@ def bilinear_interpolate(image, x, y):
 
 
 @njit(cache=True)
-def nearest_neighbor_interpolate(image, x, y):
+def _nearest_neighbor_interpolate(image, x, y):
     """
     Performs nearest neighbor interpolation to compute the pixel value at non-integer coordinates.
     Rounds the coordinates to the nearest integer pixel and returns that pixel's value.
@@ -593,7 +550,7 @@ def nearest_neighbor_interpolate(image, x, y):
         return 0
     
 @njit(cache=True)
-def int_interpolate(image, x, y):
+def _int_interpolate(image, x, y):
     """
     Performs integer interpolation to compute the pixel value at non-integer coordinates.
     Rounds the coordinates down to the nearest integer pixel and returns that pixel's value.
@@ -628,6 +585,8 @@ def warp_perspective_inverse(image, matrix, size, interpolation='bilinear'):
         numpy array: Warped image of the specified size.
 
     """
+    if interpolation not in ('nearest', 'int', 'bilinear'):
+        raise ValueError("interpolation must be 'nearest', 'int', or 'bilinear' for inverse transform")
     h, w = size
     warped_image = np.zeros((h, w), dtype=np.uint8)
     # Get the inverse matrix for mapping destination pixels back to source pixels
@@ -643,11 +602,11 @@ def warp_perspective_inverse(image, matrix, size, interpolation='bilinear'):
                 y_src = y_prime / w_prime
                 if 0 <= x_src < image.shape[1] and 0 <= y_src < image.shape[0]:
                     if interpolation == 'nearest':
-                        warped_image[y, x] = nearest_neighbor_interpolate(image, x_src, y_src)
+                        warped_image[y, x] = _nearest_neighbor_interpolate(image, x_src, y_src)
                     elif interpolation == 'int':
-                        warped_image[y, x] = int_interpolate(image, x_src, y_src)
-                    else:
-                        warped_image[y, x] = bilinear_interpolate(image, x_src, y_src)
+                        warped_image[y, x] = _int_interpolate(image, x_src, y_src)
+                    else: # bilinear
+                        warped_image[y, x] = _bilinear_interpolate(image, x_src, y_src)
 
     return warped_image
 
