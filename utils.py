@@ -533,7 +533,7 @@ def extract_cells_for_training(image_path, cell_size=40):
     """
     Minimal cell extractor for mining training data from the Sudoku dataset.
     Uses cv2 library functions only — independent of the custom pipeline in
-    Image_Processing.ipynb.
+    main.ipynb.
 
     Args:
         image_path (str): Path to a Sudoku puzzle image.

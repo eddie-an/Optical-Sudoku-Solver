@@ -7,8 +7,13 @@ venv/
 .venv/
 .ipynb_checkpoints/
 
-data/
-models/*.pkl
+# Datasets
+data/*
+!data/.gitkeep
+!data/test_puzzles.txt
+
+# SVM model exceeds 100MB, so we will ignore it
+models/*.pkl 
 
 
 # Latex
