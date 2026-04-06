@@ -1,8 +1,8 @@
 __all__ = ["create_gaussian_kernel", "linear_filter", "median_filter", 
            "create_histogram", "find_otsu_threshold", "perform_global_threshold", 
            "apply_adaptive_threshold", "harris_corners", "order_points", "find_arc_length", 
-           "find_area", "is_cell_empty", "approximate_polygon", "extract_sudoku_cells", "rotate_board", 
-           "warp_perspective_inverse", "warp_perspective_forward"]
+           "find_area", "is_cell_empty", "approximate_polygon", "rotate_board", 
+           "warp_perspective_inverse", "warp_perspective_forward", "get_perspective_transform"]
 
 import math
 import numpy as np
@@ -179,7 +179,7 @@ def find_otsu_threshold(hist_norm):
             best_threshold = i
     return best_threshold
 
-def perform_global_threshold(image, threshold, is_inverse):
+def perform_global_threshold(image, threshold, is_inverse=False):
     """
     Applies global thresholding to a grayscale image.
     Pixels with intensity above the threshold are set to 255, all others to 0.
@@ -444,20 +444,26 @@ def approximate_polygon(coordinates, epsilon, is_closed):
     return _recursive_helper(coordinates, epsilon, False)
 
 
-def is_cell_empty(cell_image, threshold_percent=0.07):
+def is_cell_empty(cell_image, threshold_percent=0.07, margin_percent=0.15):
     """
     Determines whether a Sudoku cell is empty based on ink coverage.
-    A 15% margin is cropped from the cell edges before analysis to exclude
+    Some margin is cropped from the cell edges before analysis to exclude
     grid lines from the pixel count.
     Args:
         cell_image (numpy array): Inverse binary cell image where ink=255 and paper=0.
         threshold_percent (float): Ink ratio below which the cell is considered empty.
                                    Defaults to 0.07 (7% of pixels are ink).
+        margin_percent (float): Percentage of pixels to crop off from the sides to avoid counting sudoku grid lines.
+                                Defaults to 0.15 (15% of pixels at the edges are not counted).
     Returns:
         bool: True if the cell is empty, False if it contains a digit.
     """
+    if margin_percent > 0.4 or margin_percent < 0:
+        raise ValueError("Margin percent must be between 0 and 0.4 (inclusive)")
+    if threshold_percent > 1 or threshold_percent < 0:
+        raise ValueError("Threshold percent must be between 0 and 1 (inclusive)")
     h, w = cell_image.shape
-    margin = int(h * 0.15)
+    margin = int(h * margin_percent)
     center_crop = cell_image[margin:-margin, margin:-margin] # cropping the margin off the sides to not count sudoku grid lines
     
     # Count the number of white pixels (ink)
@@ -469,55 +475,6 @@ def is_cell_empty(cell_image, threshold_percent=0.07):
     
     # If the ink ratio is smaller than our threshold, it's empty
     return ink_ratio < threshold_percent
-
-    
-def extract_sudoku_cells(board):
-    """
-    Divides a perspective-corrected Sudoku board into 81 individual cells.
-    Applies Gaussian blur and adaptive thresholding internally to determine
-    which cells are empty. The raw (non-thresholded) cropped cell is returned
-    alongside the empty flag for use by the digit classifier downstream.
-    Args:
-        board (numpy array): Grayscale board image, pre-processed using perspective
-                             transform so that only the Sudoku grid is visible.
-                             Expected to be a square image divisible by 9 (e.g. 450x450).
-    Returns:
-        list: 81 tuples of (cell_image, is_empty) in row-major order, where
-              cell_image is a cropped grayscale cell with grid lines removed,
-              and is_empty is a bool indicating whether the cell contains a digit.
-    """
-    N, M = board.shape
-
-    # Blur and threshold the warped board to get clean binary cells for empty detection
-    blurred_board = linear_filter(board, create_gaussian_kernel(9, 1.6), is_clipped=True)
-    thresh = apply_adaptive_threshold(blurred_board, 11, 2, is_inverse=True)
-
-    cells = []
-    cell_h = N // 9
-    cell_w = M // 9
-
-    for i in range(9):   # Rows
-        for j in range(9):  # Columns
-
-            # Compute pixel boundaries for this cell
-            y_start, y_end = i * cell_h, (i + 1) * cell_h
-            x_start, x_end = j * cell_w, (j + 1) * cell_w
-
-            # Slice the raw (non-thresholded) cell for the classifier
-            cell = board[y_start:y_end, x_start:x_end]
-
-            # Crop 10% margin on all sides to exclude grid lines from the digit region
-            margin_y = int(cell_h * 0.1)
-            margin_x = int(cell_w * 0.1)
-            cell_cropped = cell[margin_y:-margin_y, margin_x:-margin_x]
-
-            # Use the thresholded cell (not the cropped one) for empty detection
-            # since is_cell_empty applies its own internal margin crop
-            isEmpty = is_cell_empty(thresh[y_start:y_end, x_start:x_end], threshold_percent=0.07)
-
-            cells.append((cell_cropped, isEmpty))
-
-    return cells  # 81 (cell_image, is_empty) tuples in row-major order
 
     
 def rotate_board(board, angle):
@@ -533,8 +490,8 @@ def rotate_board(board, angle):
     return np.rot90(board, k)
 
 
-
-def bilinear_interpolate(image, x, y):
+@njit(cache=True)
+def _bilinear_interpolate(image, x, y):
     """
     Performs bilinear interpolation to compute the pixel value at non-integer coordinates.
     Uses the four nearest pixel values to calculate a weighted average based on distance.
@@ -564,11 +521,15 @@ def bilinear_interpolate(image, x, y):
 
     P = ((y2 - y) * R1 + (y - y1) * R2) if (y2 - y) + (y - y1) != 0 else 0
 
-    return int(np.clip(P, 0, 255))
+    if P < 0:
+        return 0
+    if P > 255:
+        return 255
+    return int(P)
 
 
-
-def nearest_neighbor_interpolate(image, x, y):
+@njit(cache=True)
+def _nearest_neighbor_interpolate(image, x, y):
     """
     Performs nearest neighbor interpolation to compute the pixel value at non-integer coordinates.
     Rounds the coordinates to the nearest integer pixel and returns that pixel's value.
@@ -588,8 +549,8 @@ def nearest_neighbor_interpolate(image, x, y):
     else:
         return 0
     
-
-def int_interpolate(image, x, y):
+@njit(cache=True)
+def _int_interpolate(image, x, y):
     """
     Performs integer interpolation to compute the pixel value at non-integer coordinates.
     Rounds the coordinates down to the nearest integer pixel and returns that pixel's value.
@@ -608,7 +569,7 @@ def int_interpolate(image, x, y):
         return image[y_int, x_int]
     else:
         return 0
-
+@njit(cache=True)
 def warp_perspective_inverse(image, matrix, size, interpolation='bilinear'):
     """
     Applies a perspective transformation to an image given source and destination points.
@@ -624,20 +585,12 @@ def warp_perspective_inverse(image, matrix, size, interpolation='bilinear'):
         numpy array: Warped image of the specified size.
 
     """
+    if interpolation not in ('nearest', 'int', 'bilinear'):
+        raise ValueError("interpolation must be 'nearest', 'int', or 'bilinear' for inverse transform")
     h, w = size
     warped_image = np.zeros((h, w), dtype=np.uint8)
     # Get the inverse matrix for mapping destination pixels back to source pixels
     inverse = np.linalg.inv(matrix)
-
-    # Select interpolation function
-    if interpolation == 'bilinear':
-        interp_func = bilinear_interpolate
-    elif interpolation == 'nearest':
-        interp_func = nearest_neighbor_interpolate
-    elif interpolation == 'int':
-        interp_func = int_interpolate
-    else:
-        interp_func = bilinear_interpolate  # Default
 
     for y in range(h):
         for x in range(w):
@@ -647,13 +600,17 @@ def warp_perspective_inverse(image, matrix, size, interpolation='bilinear'):
             if w_prime != 0:
                 x_src = x_prime / w_prime
                 y_src = y_prime / w_prime
-                # Use interpolation to sample at non-integer coordinates
                 if 0 <= x_src < image.shape[1] and 0 <= y_src < image.shape[0]:
-                    warped_image[y, x] = interp_func(image, x_src, y_src)
+                    if interpolation == 'nearest':
+                        warped_image[y, x] = _nearest_neighbor_interpolate(image, x_src, y_src)
+                    elif interpolation == 'int':
+                        warped_image[y, x] = _int_interpolate(image, x_src, y_src)
+                    else: # bilinear
+                        warped_image[y, x] = _bilinear_interpolate(image, x_src, y_src)
 
     return warped_image
 
-
+@njit(cache=True)
 def warp_perspective_forward(image, matrix, size, interpolation='nearest'):
     """
     Applies a perspective transformation to an image given source and destination points.
@@ -679,19 +636,43 @@ def warp_perspective_forward(image, matrix, size, interpolation='nearest'):
             y_prime = matrix[1, 0] * x + matrix[1, 1] * y + matrix[1, 2]
             w_prime = matrix[2, 0] * x + matrix[2, 1] * y + matrix[2, 2]
             if w_prime != 0:
-                # Normalize by w_prime for perspective divide
                 x_norm = x_prime / w_prime
                 y_norm = y_prime / w_prime
 
                 if interpolation == 'nearest':
                     x_dst = int(round(x_norm))
                     y_dst = int(round(y_norm))
-                    if 0 <= x_dst < w and 0 <= y_dst < h:
-                        warped_image[y_dst, x_dst] = image[y, x]
                 else:  # 'int': floor rounding
                     x_dst = int(x_norm)
                     y_dst = int(y_norm)
-                    if 0 <= x_dst < w and 0 <= y_dst < h:
-                        warped_image[y_dst, x_dst] = image[y, x]
+
+                if 0 <= x_dst < w and 0 <= y_dst < h:
+                    warped_image[y_dst, x_dst] = image[y, x]
 
     return warped_image
+
+def get_perspective_transform(src, dest):
+    """
+    Computes 3x3 perspective transformation matrix which maps four source points to four destination points.
+    Solves for the homography matrix, H, so that for each pair or corresponding points (x,y) in src and (u,v)
+    in dest, the following holds in homogeneous coordinates:
+    [u, v, 1]^T ~ H * [x, y, 1]^T
+
+    Args:
+        src (numpy array): 4x2 array of four source points (x, y).
+        dest (numpy array): 4x2 array of four destination points (u, v).
+
+    Returns:
+        numpy array: 3x3 perspective transformation matrix.
+    """
+    A = []
+    for i in range(4):
+        x, y = src[i][0], src[i][1]
+        u, v = dest[i][0], dest[i][1]
+        A.append([-x, -y, -1, 0, 0, 0, x*u, y*u, u])
+        A.append([0, 0, 0, -x, -y, -1, x*v, y*v, v])
+    A = np.array(A)
+    U, S, vt = np.linalg.svd(A)
+    H = vt[-1].reshape(3, 3)
+    H = H/H[2,2]
+    return H

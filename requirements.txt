@@ -6,5 +6,7 @@ jupyter
 ipykernel
 scikit-image
 scikit-learn
+torch
+torchvision
 fastapi
 uvicorn[standard]
