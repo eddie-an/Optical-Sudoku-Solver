@@ -44,7 +44,7 @@ We present an end-to-end optical Sudoku solver that combines classical computer 
 Sudoku is a widely recognized constraint-based puzzle that has become a common benchmark problem for evaluating computer vision pipelines involving detection, segmentation, and classification. Automatically solving Sudoku from images presents several challenges, including perspective distortion, noise, lighting variation, and digit recognition.
 
 In this work, we develop a complete optical Sudoku solver that integrates image preprocessing, geometric transformation, and machine learning. Unlike end-to-end deep learning approaches, our method emphasizes interpretability and modularity by retaining a classical computer vision pipeline for board detection while using a learned model only where it is most valuable: digit recognition.
-Custom functions are implemented for preprocessing steps such as Gaussian filtering, adaptive thresholding, polygon approximation, cell extraction, and perspective transformation, while leveraging OpenCV \cite{bradski2000opencv} for contour detection. The final digit recognition component is implemented using a CNN trained on the Chars74K printed-digit dataset \cite{deCampos09}. We initially explored an SVM using handcrafted HOG and LBP features, but the feature-based approach proved too sensitive to malformed crops, residual grid borders, and disconnected digit strokes. Replacing the SVM with a CNN, and then improving the normalization pipeline that fed it, substantially improved recognition robustness on real Sudoku cells.
+Custom functions are implemented for preprocessing steps such as Gaussian filtering, adaptive thresholding, polygon approximation, perspective transformation, and cell extraction, while leveraging OpenCV \cite{bradski2000opencv} for contour detection. The final digit recognition component is implemented using a convolutional neural network (CNN) trained on the Chars74K printed-digit dataset \cite{deCampos09}. We initially explored an SVM using handcrafted Histogram of Oriented Gradients (HOG) \cite{dalal2005histograms} and Local Binary Patterns (LBP) \cite{ojala2002multiresolution} features, but the feature-based approach proved too sensitive to malformed crops, residual grid borders, and disconnected digit strokes. Replacing the SVM with a CNN, and then improving the normalization pipeline that fed it, substantially improved recognition robustness on real Sudoku cells.
 
 \section{Methodology}
 
@@ -95,10 +95,21 @@ These four corner points are then used for perspective transformation to obtain 
 
 \subsection{Perspective Transformation}
 Once the grid corners are detected, a perspective transformation is applied to obtain a top-down view of the Sudoku board. The board is warped into a fixed square resolution (450x450), enabling consistent downstream processing.
-The perspective transformation is computed using the four detected corner points and the corresponding points in the output image. The transformation matrix is calculated using OpenCV's \texttt{getPerspectiveTransform} function, and the image is warped using \texttt{warpPerspective}.
+The perspective transformation is computed using the four detected corner points and the corresponding points in the output image. The transformation matrix is calculated using the \texttt{get\_perspective\_transform} function, and the image is warped using the \texttt{warp\_perspective\_inverse} function. These functions are custom implementations of OpenCV's perspective transformation, which we implemented manually to better understand the underlying mathematics and to allow for more control over the warping process.
 
 One caveat to perspective transformation is that it can create holes in the output image if forward mapping is used, as some pixels in the output may not correspond to any pixel in the input. Forward warping maps each pixel from the input to the output, which can lead to gaps if multiple input pixels map to the same output pixel or if some output pixels do not receive any input mapping. In contrast, inverse warping maps each pixel in the output back to the input, ensuring that every pixel in the output is assigned a value based on the corresponding location in the input image, thus avoiding holes. 
-Since the perspective transformation process can result in pixel coordinates having decimal values attached to them, these methods also rely on an interpolation method to get integer coordinates. We tested 2 methods of interpolation with both inverse and forward warping. These methods were 1) just taking the integer value and 2) rounding to the nearest integer. A third interpolation method was tested (bilinear), but only with inverse mapping since implementing it into forward warping would be significantly more complex since there are cases where multiple pixels from the original image could get mapped to the same pixel in the new one.  As seen in Figure \ref{fig:perspective_transform} below, these tests resulted in us using a combination of inverse warping using bilinear interpolation. 
+Since the perspective transformation process can result in pixel coordinates having decimal values attached to them, these methods also rely on an interpolation method to get integer coordinates. We tested three interpolation methods:
+\begin{enumerate}
+    \item \textbf{Floor Truncation:} Simply taking the integer value of the calculated coordinates, effectively performing a floor operation ($\lfloor x \rfloor, \lfloor y \rfloor$).
+    \item \textbf{Rounding:} Mapping to the nearest integer coordinate.
+    \item \textbf{Bilinear Interpolation:} Computing a weighted average of the four nearest pixels.
+\end{enumerate}
+
+\begin{quote}
+\small
+While the first two methods were tested with both forward and inverse mapping, bilinear interpolation was only implemented with inverse mapping. Implementing bilinear interpolation for forward warping is significantly more complex because there are cases where multiple pixels from the original image could get mapped to the same pixel in the new one. 
+\end{quote}
+As seen in Figure \ref{fig:perspective_transform} below, we decided that inverse warping using bilinear interpolation resulted in the best visual quality and incldued it in the pipeline.
 
 \begin{figure}[ht]
     \centering
@@ -162,7 +173,7 @@ This board is validated and solved using a backtracking algorithm. The final sol
 \end{figure}
 
 \section{Results}
-The proposed optical Sudoku solver demonstrated highly reliable performance under ideal to moderate real-world conditions. The integration of adaptive thresholding and inverse perspective warping proved highly effective in standardizing the grid against non-uniform lighting and severe viewing angles. Furthermore, the orientation-invariant classification mechanism successfully resolved puzzles captured at arbitrary rotations.
+The proposed optical Sudoku solver demonstrated highly reliable performance under ideal to moderate real-world conditions. The integration of adaptive thresholding and inverse perspective warping proved highly effective in standardizing the grid against non-uniform lighting and keystoned (slanted) viewing angles. Furthermore, the orientation-invariant classification mechanism successfully resolved puzzles captured at arbitrary rotations.
 
 The final digit recognizer was evaluated on a subset of Sudoku dataset images for which the extracted boards and cells were judged suitable for recognition (see Figure \ref{fig:cnn_confusion_matrix}). On this subset, the CNN achieved 98\% accuracy over 2374 labeled digit cells, with class-wise recall of at least 96\% for every digit and 98\% recall for digit 4 after the normalization improvements. This represents a clear improvement over the earlier SVM-based approach, particularly on difficult cells containing minor distortions or residual border artifacts.
 
@@ -187,7 +198,7 @@ While the proposed system performs reliably end-to-end under ideal conditions, r
 \begin{itemize}
 \item \textbf{Information Loss in Blurry Images:} The Suzuki-Abe topological structural analysis algorithm (used by OpenCV's contour detection) relies heavily on continuous binary lines. Blurry images suffer from information loss, leading to fragmented lines after thresholding. We attempted to mitigate this by calculating the variance of the Laplacian to estimate a blur score, bypassing the Gaussian blur step if the score fell below a certain threshold. We also experimented with morphological operations (closing and dilation) to reconnect broken lines. However, while this fixed some blurry cases, it degraded the performance on clear images, making it an unreliable global solution.
 
-\item \textbf{Partial Grid Visibility:} Because the contour detection requires a closed boundary to identify the board, the algorithm fails if the outer edge of the Sudoku grid is cut off the image frame. An unbroken quadrilateral cannot be formed, causing the pipeline to fail early (see Figure \ref{fig:disconnected_lines}).
+\item \textbf{Partial Grid Visibility:} Because the contour detection requires a closed boundary to identify the board, the algorithm fails if the outer edge of the Sudoku grid is cut off from the image frame. An unbroken quadrilateral cannot be formed, causing the pipeline to fail early (see Figure \ref{fig:disconnected_lines}).
 
 \begin{figure}[ht]
     \centering
