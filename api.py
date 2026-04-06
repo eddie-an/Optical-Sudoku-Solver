@@ -48,6 +48,57 @@ def recognize_digits(cells):
         board.append(row)
     return board
 
+
+def extract_sudoku_cells(board):
+    """
+    Divides a perspective-corrected Sudoku board into 81 individual cells.
+    Applies Gaussian blur and adaptive thresholding internally to determine
+    which cells are empty. The raw (non-thresholded) cropped cell is returned
+    alongside the empty flag for use by the digit classifier downstream.
+    Args:
+        board (numpy array): Grayscale board image, pre-processed using perspective
+                             transform so that only the Sudoku grid is visible.
+                             Expected to be a square image divisible by 9 (e.g. 450x450).
+    Returns:
+        list: 81 tuples of (cell_image, is_empty) in row-major order, where
+              cell_image is a cropped grayscale cell with grid lines removed,
+              and is_empty is a bool indicating whether the cell contains a digit.
+    """
+    N, M = board.shape
+
+    # Blur and threshold the warped board to get clean binary cells for empty detection
+    blurred_board = linear_filter(board, create_gaussian_kernel(9, 1.6), is_clipped=True)
+    thresh = apply_adaptive_threshold(blurred_board, 11, 2, is_inverse=True)
+
+    cells = []
+    cell_h = N // 9
+    cell_w = M // 9
+
+    for i in range(9):   # Rows
+        for j in range(9):  # Columns
+
+            # Compute pixel boundaries for this cell
+            y_start, y_end = i * cell_h, (i + 1) * cell_h
+            x_start, x_end = j * cell_w, (j + 1) * cell_w
+
+            # Slice the raw (non-thresholded) cell for the classifier
+            cell = board[y_start:y_end, x_start:x_end]
+
+            # Crop margin on all sides to exclude grid lines from the digit region
+            margin_percent = 0.12
+            margin_y = int(cell_h * margin_percent)
+            margin_x = int(cell_w * margin_percent)
+            cell_cropped = cell[margin_y:-margin_y, margin_x:-margin_x]
+
+            # Use the thresholded cell (not the cropped one) for empty detection
+            # since is_cell_empty applies its own internal margin crop
+            isEmpty = is_cell_empty(thresh[y_start:y_end, x_start:x_end], threshold_percent=0.06, margin_percent=0.15)
+
+            cells.append((cell_cropped, isEmpty))
+
+    return cells  # 81 (cell_image, is_empty) tuples in row-major order
+
+
 @app.post("/solve")
 async def solve(file: UploadFile = File(...)):
     # Read the uploaded image file into memory
@@ -71,7 +122,7 @@ async def solve(file: UploadFile = File(...)):
         contours = sorted(contours, key=cv2.contourArea, reverse=True)
 
         grid_contour = None
-        for contour in contours[:5]:
+        for contour in contours[:3]:
             contour = contour[:,0,:]
             perimeter = find_arc_length(contour, is_closed=True)
             epsilon = 0.02 * perimeter
@@ -97,10 +148,10 @@ async def solve(file: UploadFile = File(...)):
         ], dtype="float32")
 
         # Calculate the homography matrix and apply it
-        matrix = cv2.getPerspectiveTransform(rect, dst)
+        matrix = get_perspective_transform(rect, dst)
 
         # added logic to pick and choose the warp function and which one to use overall
-        board_img = cv2.warpPerspective(original, matrix, (side_length, side_length))
+        board_img = warp_perspective_inverse(original, matrix, (side_length, side_length))
 
         rotation_scores = {}
         for angle in [0, 90, 180, 270]:
