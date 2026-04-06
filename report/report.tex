@@ -44,12 +44,12 @@ We present an end-to-end optical Sudoku solver that combines classical computer 
 Sudoku is a widely recognized constraint-based puzzle that has become a common benchmark problem for evaluating computer vision pipelines involving detection, segmentation, and classification. Automatically solving Sudoku from images presents several challenges, including perspective distortion, noise, lighting variation, and digit recognition.
 
 In this work, we develop a complete optical Sudoku solver that integrates image preprocessing, geometric transformation, and machine learning. Unlike end-to-end deep learning approaches, our method emphasizes interpretability and modularity by retaining a classical computer vision pipeline for board detection while using a learned model only where it is most valuable: digit recognition.
-Custom functions are implemented for preprocessing steps such as Gaussian filtering, adaptive thresholding, polygon approximation, cell extraction, and perspective transformation, while leveraging OpenCV for contour detection and warping. The final digit recognition component is implemented using a CNN trained on the Chars74K printed-digit dataset. We initially explored an SVM using handcrafted HOG and LBP features, but the feature-based approach proved too sensitive to malformed crops, residual grid borders, and disconnected digit strokes. Replacing the SVM with a CNN, and then improving the normalization pipeline that fed it, substantially improved recognition robustness on real Sudoku cells.
+Custom functions are implemented for preprocessing steps such as Gaussian filtering, adaptive thresholding, polygon approximation, cell extraction, and perspective transformation, while leveraging OpenCV \cite{bradski2000opencv} for contour detection. The final digit recognition component is implemented using a CNN trained on the Chars74K printed-digit dataset \cite{deCampos09}. We initially explored an SVM using handcrafted HOG and LBP features, but the feature-based approach proved too sensitive to malformed crops, residual grid borders, and disconnected digit strokes. Replacing the SVM with a CNN, and then improving the normalization pipeline that fed it, substantially improved recognition robustness on real Sudoku cells.
 
 \section{Methodology}
 
 \subsection{Initial Grid Detection Strategy}
-Initially, we explored using Harris Corner Detection to directly identify the intersections of the grid lines and locate the four outer corners of the board. However, this approach proved to be highly sensitive to noise, text within the cells, and background textures. The resulting corner response yielded numerous false positives, making it difficult to reliably isolate the main corners of the Sudoku board as shown in Figure \ref{fig:harris_corner}.
+Initially, we explored using Harris Corner Detection \cite{harris1988combined} to directly identify the intersections of the grid lines and locate the four outer corners of the board. However, this approach proved to be highly sensitive to noise, text within the cells, and background textures. The resulting corner response yielded numerous false positives, making it difficult to reliably isolate the main corners of the Sudoku board as shown in Figure \ref{fig:harris_corner}.
 
 \begin{figure}[ht]
     \centering
@@ -76,7 +76,7 @@ Here is a comparison between global and adaptive thresholding (see Figure \ref{f
 
 The resulting binary image is then processed to detect contours.
 
-Contours are extracted using OpenCV's \texttt{findContours} function. This function returns a list of contours found in the binary image.
+Contours are extracted using OpenCV's \texttt{findContours} function, which implements the topological structural analysis developed by Suzuki and Abe \cite{suzuki1985topological}. This function returns a list of contours found in the binary image.
 Each contour is given in the format of \texttt{[[x\_1, y\_1], [x\_2, y\_2], ..., [x\_n, y\_n]]}, where $(x_i, y_i)$ are the coordinates of the contour points. The area of each contour is calculated using the Shoelace Formula, which computes the area based on the vertices of the polygon formed by the contour points. 
 The contour with the largest area that approximates a quadrilateral is assumed to correspond to the Sudoku grid (see Figure \ref{fig:contour_detection}).
 
@@ -89,7 +89,7 @@ The contour with the largest area that approximates a quadrilateral is assumed t
 \end{figure}
 
 
-To identify the corners of the grid, we apply a polygon approximation algorithm (Ramer-Douglas-Peucker) to simplify the contour from n points to four points.
+To identify the corners of the grid, we apply a polygon approximation algorithm (Ramer-Douglas-Peucker \cite{douglas1973algorithms}) to simplify the contour from n points to four points.
 These four corner points are then used for perspective transformation to obtain a top-down view of the Sudoku board, which is essential for accurate cell extraction and digit recognition.
 
 
@@ -98,7 +98,7 @@ Once the grid corners are detected, a perspective transformation is applied to o
 The perspective transformation is computed using the four detected corner points and the corresponding points in the output image. The transformation matrix is calculated using OpenCV's \texttt{getPerspectiveTransform} function, and the image is warped using \texttt{warpPerspective}.
 
 One caveat to perspective transformation is that it can create holes in the output image if forward mapping is used, as some pixels in the output may not correspond to any pixel in the input. Forward warping maps each pixel from the input to the output, which can lead to gaps if multiple input pixels map to the same output pixel or if some output pixels do not receive any input mapping. In contrast, inverse warping maps each pixel in the output back to the input, ensuring that every pixel in the output is assigned a value based on the corresponding location in the input image, thus avoiding holes. 
-Since during the perspective transformation process can result in pixel coordinates having decimal values attached to them, these methods also rely on an interpolation method to get integer coordinates. We tested 2 methods of interpolation with both inverse and forward warping. These methods were 1) just taking the integer value and 2) rounding to the nearest integer. A third interpolation method was tested (bilinear), but only with inverse mapping since implementing it into forward warping would be significantly more complex since there are cases where multiple pixels from the original image could get mapped to the same pixel in the new one.  As seen in Figure 4 below, these tests resulted in us using a combination of inverse warping using bilinear interpolation. 
+Since the perspective transformation process can result in pixel coordinates having decimal values attached to them, these methods also rely on an interpolation method to get integer coordinates. We tested 2 methods of interpolation with both inverse and forward warping. These methods were 1) just taking the integer value and 2) rounding to the nearest integer. A third interpolation method was tested (bilinear), but only with inverse mapping since implementing it into forward warping would be significantly more complex since there are cases where multiple pixels from the original image could get mapped to the same pixel in the new one.  As seen in Figure \ref{fig:perspective_transform} below, these tests resulted in us using a combination of inverse warping using bilinear interpolation. 
 
 \begin{figure}[ht]
     \centering
@@ -130,7 +130,7 @@ The orientations are sorted in descending order of average confidence.
 The system attempts to solve the Sudoku puzzle starting with the highest confidence orientation. If a valid solution is found, it is returned; otherwise, the next orientation is evaluated until a solution is obtained or all orientations are exhausted.
 
 \subsection{Digit Recognition}
-Digit classification is performed using a convolutional neural network. Each extracted cell is first normalized to a fixed $40 \times 40$ canvas so that the digit is centered and scaled consistently. During development, this normalization stage became a major focus: several failure cases were caused not by the classifier itself, but by residual cell borders and fragmented digit strokes introduced during board warping and cell extraction. To address this, the normalization pipeline was refined to explicitly remove dense border-aligned line fragments and to preserve multiple meaningful connected components when needed, which was particularly important for printed digit 4.
+Digit classification is performed using a convolutional neural network. Each extracted cell is first normalized to a fixed $40 \times 40$ canvas so that the digit is centered and scaled consistently. During development, this normalization stage became a major focus: several failure cases were caused not by the classifier itself, but by residual cell borders and fragmented digit (see Figure \ref{fig:digit_normalization}). To address this, the normalization pipeline was refined to explicitly remove dense border-aligned line fragments and to preserve multiple meaningful connected components when needed, which was particularly important for printed digit 4.
 
 \begin{figure}[ht]
     \centering
@@ -141,11 +141,11 @@ Digit classification is performed using a convolutional neural network. Each ext
 
 The final CNN uses four convolutional blocks with batch normalization, ReLU activations, max pooling, and dropout, followed by a lightweight fully connected classifier. This design was chosen to remain compact enough for project inference while still learning spatial structure directly from normalized cell images. Compared with the earlier SVM pipeline, the CNN has two key advantages:
 \begin{itemize}
-    \item \textbf{It learns features from data directly,} rather than relying on fixed handcrafted descriptors such as HOG and LBP.
+    \item \textbf{It learns features from data directly,} rather than relying on fixed handcrafted descriptors such as HOG \cite{dalal2005histograms} and LBP \cite{ojala2002multiresolution}.
     \item \textbf{It is more tolerant of small geometric and topological distortions,} such as stroke thickening, disconnected components, and minor border remnants.
 \end{itemize}
 
-The model was trained on the Chars74K printed-digit dataset rather than on cells mined from the Sudoku dataset. We initially attempted to use extracted Sudoku cells for training, but the quality of automatic grid detection and cell extraction was too inconsistent; noisy training labels from misdetected boards would have degraded the recognizer rather than improved it. Chars74K provided a cleaner supervised training source, while the Sudoku dataset was reserved for evaluation on real pipeline outputs.
+The model was trained on the Chars74K printed-digit dataset rather than on cells mined from the Sudoku dataset. We initially attempted to use extracted Sudoku cells for training, but the quality of automatic grid detection and cell extraction was too inconsistent; noisy training labels from misdetected boards would have degraded the recognizer rather than improved it. Chars74K provided a cleaner supervised training source, while the Sudoku dataset \cite{wichtSudoku} was reserved for evaluation on real pipeline outputs.
 
 We also explored an SVM based on HOG and LBP features and a transfer-learning variant using MNIST pretraining before Chars74K finetuning. In practice, neither alternative removed the main failure modes. The largest gains came from switching to the CNN and improving normalization so that recognizable digits were preserved before classification.
 
@@ -164,7 +164,7 @@ This board is validated and solved using a backtracking algorithm. The final sol
 \section{Results}
 The proposed optical Sudoku solver demonstrated highly reliable performance under ideal to moderate real-world conditions. The integration of adaptive thresholding and inverse perspective warping proved highly effective in standardizing the grid against non-uniform lighting and severe viewing angles. Furthermore, the orientation-invariant classification mechanism successfully resolved puzzles captured at arbitrary rotations.
 
-The final digit recognizer was evaluated on a subset of Sudoku dataset images for which the extracted boards and cells were judged suitable for recognition. On this subset, the CNN achieved 98\% accuracy over 2374 labeled digit cells, with class-wise recall of at least 96\% for every digit and 98\% recall for digit 4 after the normalization improvements. This represents a clear improvement over the earlier SVM-based approach, particularly on difficult cells containing minor distortions or residual border artifacts.
+The final digit recognizer was evaluated on a subset of Sudoku dataset images for which the extracted boards and cells were judged suitable for recognition (see Figure \ref{fig:cnn_confusion_matrix}). On this subset, the CNN achieved 98\% accuracy over 2374 labeled digit cells, with class-wise recall of at least 96\% for every digit and 98\% recall for digit 4 after the normalization improvements. This represents a clear improvement over the earlier SVM-based approach, particularly on difficult cells containing minor distortions or residual border artifacts.
 
 \begin{figure}[ht]
     \centering
@@ -173,7 +173,7 @@ The final digit recognizer was evaluated on a subset of Sudoku dataset images fo
     \label{fig:cnn_confusion_matrix}
 \end{figure}
 
-These experiments also helped clarify the main limitation of the end-to-end system. After the CNN and normalization pipeline were refined, digit recognition became highly reliable on well-extracted cells. The remaining errors were more often associated with earlier stages of the pipeline, such as grid detection, perspective rectification, and cell extraction quality. This suggests that further end-to-end improvements will depend more on strengthening board localization and cell extraction than on increasing classifier complexity.
+These experiments also helped clarify the main limitation of the end-to-end system. After the CNN and normalization pipeline were refined, digit recognition became highly reliable on well-extracted cells. The remaining errors were more often associated with earlier stages of the pipeline, such as grid detection, perspective rectification, and cell extraction quality as shown in Figure \ref{fig:cnn_worst_errors}. This suggests that further end-to-end improvements will depend more on strengthening board localization and cell extraction than on increasing classifier complexity.
 
 \begin{figure}[ht]
     \centering
@@ -187,7 +187,7 @@ While the proposed system performs reliably end-to-end under ideal conditions, r
 \begin{itemize}
 \item \textbf{Information Loss in Blurry Images:} The Suzuki-Abe topological structural analysis algorithm (used by OpenCV's contour detection) relies heavily on continuous binary lines. Blurry images suffer from information loss, leading to fragmented lines after thresholding. We attempted to mitigate this by calculating the variance of the Laplacian to estimate a blur score, bypassing the Gaussian blur step if the score fell below a certain threshold. We also experimented with morphological operations (closing and dilation) to reconnect broken lines. However, while this fixed some blurry cases, it degraded the performance on clear images, making it an unreliable global solution.
 
-\item \textbf{Partial Grid Visibility:} Because the contour detection requires a closed boundary to identify the board, the algorithm fails if the outer edge of the Sudoku grid is cut off by the camera frame. An unbroken quadrilateral cannot be formed, causing the pipeline to fail early (see Figure \ref{fig:disconnected_lines}).
+\item \textbf{Partial Grid Visibility:} Because the contour detection requires a closed boundary to identify the board, the algorithm fails if the outer edge of the Sudoku grid is cut off the image frame. An unbroken quadrilateral cannot be formed, causing the pipeline to fail early (see Figure \ref{fig:disconnected_lines}).
 
 \begin{figure}[ht]
     \centering
