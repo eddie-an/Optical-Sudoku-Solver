@@ -38,6 +38,7 @@ Koen Schoffner\\
 
 \begin{abstract}
 We present an end-to-end optical Sudoku solver that combines classical computer vision techniques with convolutional neural network (CNN) based digit recognition. The system processes an input image of a Sudoku puzzle, detects and rectifies the grid using perspective transformation, extracts individual cells, and classifies digits using a CNN trained on the Chars74K printed-digit dataset. To improve robustness, the system includes orientation invariance, adaptive thresholding, and cell normalization tuned to suppress residual grid borders while preserving fragile digit structure. Experimental results show that digit recognition is no longer the dominant failure mode of the pipeline; instead, the remaining errors are primarily caused by grid detection and downstream cell extraction quality.
+Source code is available at \url{https://github.com/eddie-an/Optical-Sudoku-Solver}.
 \end{abstract}
 
 \section{Introduction}
