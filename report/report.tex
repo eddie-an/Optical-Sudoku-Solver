@@ -65,7 +65,7 @@ Due to this unreliability, we pivoted to an edge-based topological approach, uti
 The input image is first converted to grayscale and smoothed using a Gaussian filter to reduce noise. We implement Gaussian filtering manually using a generated kernel and convolution operation.
 
 Adaptive thresholding is applied to convert the image into a binary representation. Unlike global thresholding, adaptive thresholding computes a local threshold for each pixel, allowing the system to handle uneven lighting conditions.
-Here is a comparison between global and adaptive thresholding (see Figure \ref{fig:thresholding}):
+Figure \ref{fig:thresholding} illustrates a comparison between global and adaptive thresholding.
 \begin{figure}[ht]
     \centering
     \includegraphics[width=0.22\textwidth]{images/otsu_thresholding.png}
@@ -106,11 +106,10 @@ Since the perspective transformation process can result in pixel coordinates hav
     \item \textbf{Bilinear Interpolation:} Computing a weighted average of the four nearest pixels.
 \end{enumerate}
 
-\begin{quote}
-\small
-While the first two methods were tested with both forward and inverse mapping, bilinear interpolation was only implemented with inverse mapping. Implementing bilinear interpolation for forward warping is significantly more complex because there are cases where multiple pixels from the original image could get mapped to the same pixel in the new one. 
-\end{quote}
-As seen in Figure \ref{fig:perspective_transform} below, we decided that inverse warping using bilinear interpolation resulted in the best visual quality and incldued it in the pipeline.
+
+It is worth noting that while the first two methods were tested with both forward and inverse mapping, bilinear interpolation was only implemented with inverse mapping. Implementing bilinear interpolation for forward warping is significantly more complex because there are cases where multiple pixels from the original image could get mapped to the same pixel in the new one. 
+
+As seen in Figure \ref{fig:perspective_transform} below, we decided that inverse warping using bilinear interpolation resulted in the best visual quality and included it in the pipeline.
 
 \begin{figure}[ht]
     \centering
@@ -137,12 +136,12 @@ The warped square board is divided into a $9 \times 9$ grid, producing 81 indivi
 To determine whether a cell is empty, we compute the ratio of foreground (ink) pixels using adaptive thresholding. Cells with low ink density are classified as empty and skipped during digit recognition.
 
 \subsection{Orientation Invariance}
-To handle images captured at arbitrary rotations, the system evaluates four orientations (0°, 90°, 180°, 270°). For each orientation, digit classification confidence scores are computed from the softmax outputs of the trained CNN.
+To handle images captured at arbitrary rotations, the system evaluates four orientations ($0^\circ$, $90^\circ$, $180^\circ$, $270^\circ$). For each orientation, digit classification confidence scores are computed from the softmax outputs of the trained CNN.
 The orientations are sorted in descending order of average confidence.
 The system attempts to solve the Sudoku puzzle starting with the highest confidence orientation. If a valid solution is found, it is returned; otherwise, the next orientation is evaluated until a solution is obtained or all orientations are exhausted.
 
 \subsection{Digit Recognition}
-Digit classification is performed using a convolutional neural network. Each extracted cell is first normalized to a fixed $40 \times 40$ canvas so that the digit is centered and scaled consistently. During development, this normalization stage became a major focus: several failure cases were caused not by the classifier itself, but by residual cell borders and fragmented digit (see Figure \ref{fig:digit_normalization}). To address this, the normalization pipeline was refined to explicitly remove dense border-aligned line fragments and to preserve multiple meaningful connected components when needed, which was particularly important for printed digit 4.
+Digit classification is performed using a convolutional neural network. Each extracted cell is first normalized to a fixed $40 \times 40$ canvas so that the digit is centered and scaled consistently. During development, this normalization stage became a major focus: several failure cases were caused not by the classifier itself, but by residual cell borders and fragmented digits (see Figure \ref{fig:digit_normalization}). To address this, the normalization pipeline was refined to explicitly remove dense border-aligned line fragments and to preserve multiple meaningful connected components when needed, which was particularly important for printed digit '4'.
 
 \begin{figure}[ht]
     \centering
