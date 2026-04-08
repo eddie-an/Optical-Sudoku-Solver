@@ -42,12 +42,12 @@ There are two digit recognition models
 - CNN (Convolutional Neural Network)
 
 #### Training the SVM model
-To train the SVM model, run `DigitRecognitionSVM.ipynb` — this downloads the required datasets, trains the SVM, and saves the model to `models/digit_model.pkl`.
+To train the SVM model, run `DigitRecognitionSVM.ipynb` — this downloads the required datasets, trains the SVM, and saves the model to `models/digit_svm.pkl`.
 
-> **Note:** `models/digit_model.pkl` is not included in the repository (file size exceeds GitHub's 100MB limit). You must generate it by running `DigitRecognitionSVM.ipynb` before using `main.ipynb`.
+> **Note:** `models/digit_svm.pkl` is not included in the repository (file size exceeds GitHub's 100MB limit). You must generate it by running `DigitRecognitionSVM.ipynb` before using `main.ipynb`.
 
 #### To evaluate SVM's digit recognition performance
-Run `EvaluationSVM.ipynb` after `DigitRecognitionSVM.ipynb`. Requires `models/digit_model.pkl` and `data/test_puzzles.txt` to exist.
+Run `EvaluationSVM.ipynb` after `DigitRecognitionSVM.ipynb`. Requires `models/digit_svm.pkl` and `data/test_puzzles.txt` to exist.
 
 #### Training the CNN model
 
@@ -57,6 +57,6 @@ To train the CNN model, run `DigitRecognitionCNN.ipynb` — this downloads the r
 
 
 ### Running the Pipeline
-Once the digit recognition models have been trained, you should see the following files: `models/digit_cnn.pth` and `models/digit_model.pkl`.
+Once the digit recognition models have been trained, you should see the following files: `models/digit_cnn.pth` and `models/digit_svm.pkl`.
 
 Run `main.ipynb` to run the sudoku solver pipeline.

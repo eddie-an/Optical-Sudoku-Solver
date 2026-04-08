@@ -30,7 +30,7 @@ app.add_middleware(
 )
 
 # ML model for digit recognition
-model = joblib.load("models/digit_model.pkl")
+model = joblib.load("models/digit_svm.pkl")
 
 def recognize_digits(cells):
     board = []
