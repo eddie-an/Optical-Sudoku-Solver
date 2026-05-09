@@ -64,7 +64,6 @@ def solve_sudoku(board):
 
     _backtrack(0, 0)
 
-
 def display_board(board):
     for i in range(9):
         for j in range(9):
