@@ -12,30 +12,3 @@ __pycache__
 venv/
 .venv/
 .ipynb_checkpoints/
-
-data/*
-!data/.gitkeep
-!data/test_puzzles.txt
-
-# API
-
-# Datasets
-computer-vision-api/data/*
-!computer-vision-api/data/.gitkeep
-!computer-vision-api/data/test_puzzles.txt
-
-# SVM model exceeds 100MB, so we will ignore it
-computer-vision-api/models/*.pkl 
-
-
-# Latex for the project report
-*.aux
-*.log
-*.out
-*.toc
-*.bbl
-*.blg
-*.fls
-*.fdb_latexmk
-*.synctex.gz
-*.brf

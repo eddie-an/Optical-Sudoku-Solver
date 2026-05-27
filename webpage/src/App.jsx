@@ -38,8 +38,7 @@ function App() {
     setIsLoading(true);
     const formData = new FormData();
     formData.append("file", image);
-
-    const url = "http://localhost:8000/solve"
+    const url = `${import.meta.env.VITE_API_BASE_URL}/solve`
     try {
       const response = await fetch(
         url, 

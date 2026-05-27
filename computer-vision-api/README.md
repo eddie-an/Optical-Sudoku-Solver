@@ -1,4 +1,4 @@
-# Optical-Sudoku-Solver
+# Optical-Sudoku-Solver API
 Solves Sudoku puzzles using computer vision
 
 ## Installing dependencies
@@ -57,6 +57,16 @@ To train the CNN model, run `DigitRecognitionCNN.ipynb` — this downloads the r
 
 
 ### Running the Pipeline
-Once the digit recognition models have been trained, you should see the following files: `models/digit_cnn.pth` and `models/digit_svm.pkl`.
 
+You can run the computer vision pipeline in one of two ways: 
+- Jupyter Notebook (best for seeing intermediate steps)
+- API (best for app integration)
+
+> **Note:** The pipeline can only be run once all the dependencies have been installed and the digit recognition models have been trained. You should see the following files: `models/digit_cnn.pth` and `models/digit_svm.pkl`.
+
+#### Running on Jupyter Notebook
 Run `main.ipynb` to run the sudoku solver pipeline.
+
+#### Running the API
+
+Run `uvicorn apu:app --reload` to start the Uvicorn server for the API.
